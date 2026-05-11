@@ -84,21 +84,23 @@ public class TorrentManager(TorrentState torrentState, FileManager fileManager) 
 
     private void AssignPiecesToPeer(PeerConnection peerConnection)
     {
-        if (peerConnection.BusyPieces.Length >= 3)
+        if (peerConnection.BusyPieces.Length >= 2)
         {
             return;
         }
 
         var interesting = peerConnection.Bitfield.And(torrentState.Bitfield.Not());
         var interestingPieces = interesting.GetPieceIndices()
-            .Except(this.connectionManager!.Peers.SelectMany(p => p.BusyPieces));
+            .Except(this.connectionManager!.Peers.SelectMany(p => p.BusyPieces))
+            .ToArray();
 
         var orderedInterestingPieces = interestingPieces.Select(i => (index: i, count: pieceMap.GetCount(i)))
             .OrderBy(i => i.count)
             .ThenBy(i => Random.Shared.NextDouble())
-            .Select(i => i.index);
+            .Select(i => i.index)
+            .ToArray();
 
-        var piecesToDownload = orderedInterestingPieces.Take(3 - peerConnection.BusyPieces.Length);
+        var piecesToDownload = orderedInterestingPieces.Take(2 - peerConnection.BusyPieces.Length);
 
         if (!piecesToDownload.Any())
         {

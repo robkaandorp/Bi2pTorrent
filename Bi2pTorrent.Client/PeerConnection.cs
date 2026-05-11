@@ -45,8 +45,6 @@ public class PeerConnection(SamSession samSession, string myPeerId, Torrent torr
 
     public Peer Peer => peer;
 
-    public ConcurrentQueue<int> DownloadQueue => this.downloadQueue;
-
     public int[] BusyPieces
     {
         get
@@ -394,7 +392,7 @@ public class PeerConnection(SamSession samSession, string myPeerId, Torrent torr
                 else if (message is PieceMessage pieceMessage && !pieceMessage.Cancelled)
                 {
                     var buffer = new byte[13];
-                    BinaryPrimitives.WriteInt32BigEndian(buffer, 13 + pieceMessage.Length);
+                    BinaryPrimitives.WriteInt32BigEndian(buffer, 9 + pieceMessage.Length);
                     buffer[4] = pieceMessage.Type;
                     BinaryPrimitives.WriteInt32BigEndian(buffer.AsSpan(5), pieceMessage.PieceIndex);
                     BinaryPrimitives.WriteInt32BigEndian(buffer.AsSpan(9), pieceMessage.Begin);
