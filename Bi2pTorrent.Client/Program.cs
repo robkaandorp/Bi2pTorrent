@@ -44,6 +44,8 @@ Console.WriteLine($"Protocol destination: {protocolDestination.GetB32Hostname()}
 var myPeerId = "Bi2p-0.1.0" + protocolSession.Destination!.GetB32Hostname()[..10];
 var announceClient = new AnnounceClient(protocolSession, myPeerId);
 
+var connectionManagers = new List<ConnectionManager>();
+
 foreach (var torrent in torrentRepository.Torrents)
 {
     var torrentState = new TorrentState(torrent);
@@ -64,8 +66,7 @@ foreach (var torrent in torrentRepository.Torrents)
         var torrentManager = new TorrentManager(torrentState, fileManager);
         var connectionManager = new ConnectionManager(protocolSession, myPeerId, torrent, torrentManager, torrentState);
         torrentManager.SetConnectionManager(connectionManager);
-
-        await connectionManager.StartAsync();
+        connectionManagers.Add(connectionManager);
 
         foreach (var peer in response.Peers)
         {
@@ -73,5 +74,7 @@ foreach (var torrent in torrentRepository.Torrents)
         }
     }
 }
+
+_ = new PeerListener(protocolSession, connectionManagers.ToArray()).StartAsync();
 
 Console.ReadLine();

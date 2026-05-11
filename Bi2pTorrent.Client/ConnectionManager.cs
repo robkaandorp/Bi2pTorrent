@@ -1,5 +1,7 @@
 ﻿using BencodeNET.Torrents;
 
+using Bi2pTorrent.Client.Protocol;
+
 using DotI2p;
 
 using System.Net.Sockets;
@@ -21,30 +23,7 @@ public class ConnectionManager(SamSession protocolSession, string myPeerId, Torr
         }
     }
 
-    public async Task StartAsync()
-    {
-        _ = Task.Factory.StartNew(async () =>
-        {
-            while (true)
-            {
-                var virtualStream = protocolSession.CreateVirtualStream();
-                var acceptedConnection = await virtualStream.AcceptAsync();
-
-                var peer = new Peer(acceptedConnection.Destination.GetB32Hostname());
-                var peerConnection = new PeerConnection(protocolSession, myPeerId, torrent, peer, torrentManager);
-
-                try
-                {
-                    await this.ConnectPeerAsync(peer, peerConnection, acceptedConnection.TcpClient);
-                }
-                catch (Exception ex)
-                {
-                    Console.WriteLine($"{peer.Address} - Connection failed: {ex.Message}");
-                    virtualStream.Dispose();
-                }
-            }
-        }, TaskCreationOptions.LongRunning);
-    }
+    public Torrent Torrent => torrent;
 
     public async Task AddPeerAsync(Peer peer)
     {
@@ -76,6 +55,12 @@ public class ConnectionManager(SamSession protocolSession, string myPeerId, Torr
         }
     }
 
+    public async Task AddPeerFromListener(Peer peer, AcceptedConnection acceptedConnection, Handshake handshake)
+    {
+        var peerConnection = new PeerConnection(protocolSession, myPeerId, torrent, peer, torrentManager);
+        await this.ConnectPeerAsync(peer, peerConnection, acceptedConnection.TcpClient, handshake);
+    }
+
     public void HavePiece(int pieceIndex)
     {
         lock (this.peers)
@@ -98,9 +83,9 @@ public class ConnectionManager(SamSession protocolSession, string myPeerId, Torr
         }
     }
 
-    private async Task ConnectPeerAsync(Peer peer, PeerConnection peerConnection, TcpClient tcpClient)
+    private async Task ConnectPeerAsync(Peer peer, PeerConnection peerConnection, TcpClient tcpClient, Handshake? handshake = null)
     {
-        if (await peerConnection.ConnectAsync(tcpClient))
+        if (await peerConnection.ConnectAsync(tcpClient, handshake))
         {
             lock (peers)
             {

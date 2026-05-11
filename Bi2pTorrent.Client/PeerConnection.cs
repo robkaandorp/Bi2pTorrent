@@ -61,42 +61,42 @@ public class PeerConnection(SamSession samSession, string myPeerId, Torrent torr
         }
     }
 
-    public async Task<bool> ConnectAsync(TcpClient? tcpClient)
+    public async Task<bool> ConnectAsync(TcpClient? tcpClient, Handshake? receiveHandshake = null)
     {
         this.tcpClient = tcpClient;
-        var infoHash = torrent.GetInfoHashBytes();
-        var handshake = new Handshake();
-
-        this.tcpClient!.ReceiveTimeout = 10000;
+        this.tcpClient!.ReceiveTimeout = 20000;
         var stream = this.tcpClient!.GetStream();
-        stream.WriteByte(handshake.Length);
-        stream.Write(handshake.Protocol);
-        stream.Write(handshake.Reserved);
+
+        var infoHash = torrent.GetInfoHashBytes();
+        
+        var sendHandshake = new Handshake();
+        stream.WriteByte(sendHandshake.Length);
+        stream.Write(sendHandshake.Protocol);
+        stream.Write(sendHandshake.Reserved);
         stream.Write(infoHash);
         stream.Write(Encoding.ASCII.GetBytes(myPeerId));
         await stream.FlushAsync();
 
-        try
+        if (receiveHandshake == null)
         {
-            handshake.Length = (byte)stream.ReadByte();
-            stream.ReadExactly(handshake.Protocol, 0, handshake.Length);
-            stream.ReadExactly(handshake.Reserved, 0, 8);
-            stream.ReadExactly(handshake.InfoHash, 0, 20);
-            stream.ReadExactly(handshake.PeerId, 0, 20);
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"{peer.Address} - Handshake failed: {ex.Message}");
-            return false;
+            try
+            {
+                receiveHandshake = Handshake.FromStream(stream);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"{peer.Address} - Handshake failed: {ex.Message}");
+                return false;
+            }
         }
 
-        if (!handshake.InfoHash.SequenceEqual(infoHash))
+        if (!receiveHandshake.InfoHash.SequenceEqual(infoHash))
         {
             Console.WriteLine($"{peer.Address} - Handshake failed: InfoHash does not match.");
             return false;
         }
 
-        Console.WriteLine($"{peer.Address} - Handshake successful! Extensions: {string.Join(' ', handshake.Reserved.Select(b => Convert.ToString(b, 2).PadLeft(8, '0')))}");
+        Console.WriteLine($"{peer.Address} - Handshake successful! Extensions: {string.Join(' ', receiveHandshake.Reserved.Select(b => Convert.ToString(b, 2).PadLeft(8, '0')))}");
 
         _ = Task.Factory.StartNew(ReceiverAsync, TaskCreationOptions.LongRunning);
         _ = Task.Factory.StartNew(SenderAsync, TaskCreationOptions.LongRunning);
