@@ -2,6 +2,8 @@
 
 using DotI2p;
 
+using System.Net;
+
 Console.WriteLine("Bi2pTorrent - A torrent client for the invisible internet");
 
 var torrentRepository = new TorrentRepository(@"C:\Projects\Personal\Bi2pTorrent\torrents");
@@ -15,7 +17,17 @@ foreach (var torrent in torrentRepository.Torrents)
     await fileManager.EnsureFilesAsync(torrent);
 }
 
-var samConnection = new SamConnection();
+SamConnection samConnection;
+
+if (args.Length > 0)
+{
+    samConnection = new SamConnection(IPAddress.Parse(args[0]));
+}
+else
+{
+    samConnection = new SamConnection();
+}
+
 await samConnection.ConnectAsync();
 
 //var trackerSession = new SamSession(samConnection);
