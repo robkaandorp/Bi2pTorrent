@@ -48,6 +48,11 @@ public class ConnectionManager(SamSession protocolSession, string myPeerId, Torr
 
     public async Task AddPeerAsync(Peer peer)
     {
+        if (peer.Address == protocolSession.Destination?.GetB32Hostname())
+        {
+            return;
+        }
+
         lock (this.peers)
         {
             if (this.peers.ContainsKey(peer.Address))
