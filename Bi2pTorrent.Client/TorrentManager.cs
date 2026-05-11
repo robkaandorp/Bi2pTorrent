@@ -23,6 +23,11 @@ public class TorrentManager(TorrentState torrentState, FileManager fileManager) 
             if (!peerConnection.LocalInterested)
             {
                 peerConnection.SetInterested(true);
+
+                if (!peerConnection.RemoteChoked)
+                {
+                    this.AssignPiecesToPeer(peerConnection);
+                }
             }
         }
         else
