@@ -397,6 +397,7 @@ public class PeerConnection(SamSession samSession, string myPeerId, Torrent torr
                     BinaryPrimitives.WriteInt32BigEndian(buffer.AsSpan(5), pieceMessage.PieceIndex);
                     BinaryPrimitives.WriteInt32BigEndian(buffer.AsSpan(9), pieceMessage.Begin);
                     await stream.WriteAsync(buffer);
+                    bytesWritten += buffer.Length;
 
                     byte[] data;
 
@@ -405,7 +406,13 @@ public class PeerConnection(SamSession samSession, string myPeerId, Torrent torr
                         data = this.uploadMemory[pieceMessage.PieceIndex].Data;
                     }
 
+                    if (data.Length != pieceMessage.Length)
+                    {
+                        Console.WriteLine($"Error: Trying to send piece {pieceMessage.PieceIndex} with length {data.Length}, but message specifies length {pieceMessage.Length}");
+                    }
+
                     await stream.WriteAsync(data);
+                    bytesWritten += data.Length;
                 }
                 else if (message is RequestMessage requestMessage && !this.RemoteChoked)
                 {
