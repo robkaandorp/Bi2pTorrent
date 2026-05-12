@@ -8,7 +8,6 @@ using DotI2p;
 using System.Buffers.Binary;
 using System.Collections.Concurrent;
 using System.Net.Sockets;
-using System.Text;
 
 namespace Bi2pTorrent.Client;
 
@@ -66,26 +65,28 @@ public class PeerConnection(SamSession samSession, string myPeerId, Torrent torr
         var stream = this.tcpClient!.GetStream();
 
         var infoHash = torrent.GetInfoHashBytes();
-        
-        var sendHandshake = new Handshake();
-        stream.WriteByte(sendHandshake.Length);
-        stream.Write(sendHandshake.Protocol);
-        stream.Write(sendHandshake.Reserved);
-        stream.Write(infoHash);
-        stream.Write(Encoding.ASCII.GetBytes(myPeerId));
+
+        var sendHandshake = new Handshake(infoHash, myPeerId);
+        await sendHandshake.ToStreamAsync(stream);
         await stream.FlushAsync();
 
         if (receiveHandshake == null)
         {
             try
             {
-                receiveHandshake = Handshake.FromStream(stream);
+                receiveHandshake = await Handshake.FromStreamAsync(stream);
             }
             catch (Exception ex)
             {
                 Console.WriteLine($"{peer.Address} - Handshake failed: {ex.Message}");
                 return false;
             }
+        }
+
+        if (receiveHandshake.Length != 19 || receiveHandshake.Protocol != "BitTorrent protocol")
+        {
+            Console.WriteLine($"{peer.Address} - Handshake failed: Invalid protocol identifier.");
+            return false;
         }
 
         if (!receiveHandshake.InfoHash.SequenceEqual(infoHash))
@@ -171,11 +172,14 @@ public class PeerConnection(SamSession samSession, string myPeerId, Torrent torr
     private async Task ReceiverAsync()
     {
         this.tcpClient!.ReceiveTimeout = 180000;    // 3 minutes
-        var reader = new BinaryReader(this.tcpClient!.GetStream());
+        var stream = this.tcpClient!.GetStream();
+        Memory<byte> buffer = new byte[32 * 1024];
+        var lengthBytes = new byte[4];
 
         while (this.tcpClient.Connected)
         {
-            var length = BinaryPrimitives.ReverseEndianness(reader.ReadInt32());
+            await stream.ReadExactlyAsync(lengthBytes);
+            var length = BinaryPrimitives.ReadInt32BigEndian(lengthBytes);
 
             if (length == 0)
             {
@@ -184,157 +188,169 @@ public class PeerConnection(SamSession samSession, string myPeerId, Torrent torr
                 continue;
             }
 
-            var type = reader.ReadByte();
-
-            switch (type)
+            if (length > 32 * 1024)
             {
-                case 0: // Choke
-                    Console.WriteLine($"{peer.Address} -> Choke");
-
-                    if (!this.RemoteChoked)
-                    {
-                        this.RemoteChoked = true;
-
-                        lock (this.downloadQueue)
-                        {
-                            this.downloadQueue.Clear();
-                        }
-
-                        lock (this.downloadMemory)
-                        {
-                            this.downloadMemory.Clear();
-                        }
-
-                        this.backlogSemaphore.Release(MaxBacklog - this.backlogSemaphore.CurrentCount);
-                        eventHandler.RemoteChokedChanged(this, true);
-                    }
-                    break;
-                case 1: // Unchoke
-                    Console.WriteLine($"{peer.Address} -> Unchoke");
-
-                    if (this.RemoteChoked)
-                    {
-                        this.RemoteChoked = false;
-                        eventHandler.RemoteChokedChanged(this, false);
-                    }
-                    break;
-                case 2: // Interested
-                    Console.WriteLine($"{peer.Address} -> Interested");
-
-                    if (!this.RemoteInterested)
-                    {
-                        this.RemoteInterested = true;
-                        eventHandler.RemoteInterestedChanged(this, true);
-                    }
-                    break;
-                case 3: // Not Interested
-                    Console.WriteLine($"{peer.Address} -> Not Interested");
-
-                    if (this.RemoteInterested)
-                    {
-                        lock (this.uploadMemory)
-                        {
-                            this.uploadMemory.Clear();
-                        }
-
-                        this.RemoteInterested = false;
-                        eventHandler.RemoteInterestedChanged(this, false);
-                    }
-                    break;
-                case 4: // Have
-                    int pieceIndex = BinaryPrimitives.ReverseEndianness(reader.ReadInt32());
-                    Console.WriteLine($"{peer.Address} -> Have {pieceIndex}");
-                    this.bitfield.SetPiece(pieceIndex);
-                    eventHandler.BitfieldChanged(this, this.bitfield);
-
-                    lock (this.uploadMemory)
-                    {
-                        if (this.uploadMemory.ContainsKey(pieceIndex))
-                        {
-                            this.uploadMemory.Remove(pieceIndex);
-                        }
-                    }
-                    break;
-                case 5: // Bitfield
-                    var bitfield = reader.ReadBytes((int)length - 1);
-                    this.bitfield = new Bitfield(torrent.NumberOfPieces, bitfield);
-                    Console.WriteLine($"{peer.Address} -> Bitfield ({bitfield.Length} bytes), has {this.bitfield.CompletedPieceCount} of {torrent.NumberOfPieces} pieces = {this.bitfield.CompletedPieceCount * 100.0 / torrent.NumberOfPieces:N1}%");
-                    eventHandler.BitfieldChanged(this, this.bitfield);
-                    break;
-                case 6: // Request
-                    var pieceMessage = new PieceMessage(
-                        BinaryPrimitives.ReverseEndianness(reader.ReadInt32()),
-                        BinaryPrimitives.ReverseEndianness(reader.ReadInt32()),
-                        BinaryPrimitives.ReverseEndianness(reader.ReadInt32()));
-                    Console.WriteLine($"{peer.Address} -> Request piece {pieceMessage.PieceIndex}, begin {pieceMessage.Begin}, length {pieceMessage.Length}");
-
-                    bool loadPiece = false;
-
-                    lock (this.uploadMemory)
-                    {
-                        loadPiece = !this.uploadMemory.ContainsKey(pieceMessage.PieceIndex);
-                    }
-
-                    var memoryPiece = await eventHandler.LoadPieceAsync(this, pieceMessage.PieceIndex);
-
-                    lock (this.uploadMemory)
-                    {
-                        this.uploadMemory[pieceMessage.PieceIndex] = memoryPiece;
-                    }
-
-                    this.messageQueue.Enqueue(pieceMessage);
-                    this.messageQueueEvent.Set();
-                    break;
-                case 7: // Piece
-                    this.backlogSemaphore.Release();
-                    int pieceIndex2 = BinaryPrimitives.ReverseEndianness(reader.ReadInt32());
-                    int begin2 = BinaryPrimitives.ReverseEndianness(reader.ReadInt32());
-                    var block = reader.ReadBytes((int)length - 9);
-                    var complete = false;
-
-                    lock (this.downloadMemory)
-                    {
-                        if (this.downloadMemory.ContainsKey(pieceIndex2))
-                        {
-                            this.downloadMemory[pieceIndex2].Write(block, begin2, block.Length);
-                            complete = this.downloadMemory[pieceIndex2].IsComplete();
-                        }
-                    }
-
-                    if (complete)
-                    {
-                        Console.WriteLine($"{peer.Address} -> Received piece {pieceIndex2}");
-                        await eventHandler.ReceivedPieceAsync(this, this.downloadMemory[pieceIndex2]);
-
-                        lock (this.downloadMemory)
-                        {
-                            this.downloadMemory.Remove(pieceIndex2);
-                        }
-                    }
-                    break;
-                case 8: // Cancel
-                    int cancelPieceIndex = BinaryPrimitives.ReverseEndianness(reader.ReadInt32());
-                    int cancelBegin = BinaryPrimitives.ReverseEndianness(reader.ReadInt32());
-                    int cancelLength = BinaryPrimitives.ReverseEndianness(reader.ReadInt32());
-                    Console.WriteLine($"{peer.Address} -> Cancel piece {cancelPieceIndex}, begin {cancelBegin}, length {cancelLength}");
-
-                    foreach (var item in this.messageQueue)
-                    {
-                        if (item is PieceMessage pieceMsg &&
-                            pieceMsg.PieceIndex == cancelPieceIndex && pieceMsg.Begin == cancelBegin && pieceMsg.Length == cancelLength)
-                        {
-                            pieceMsg.Cancelled = true;
-                        }
-                    }
-                    break;
-                default:
-                    Console.WriteLine($"{peer.Address} -> Unknown message type {type}");
-                    break;
+                Console.WriteLine($"{peer.Address} - Invalid message length {length}, closing connection.");
+                this.tcpClient.Close();
+                break;
             }
+
+            var bufferSlice = buffer.Slice(0, length);
+            await stream.ReadExactlyAsync(bufferSlice);
 
             lock (statsLock)
             {
                 bytesRead += 4 + (ulong)length;
+            }
+
+            var message = MessageFactory.Create(bufferSlice);
+
+            if (message is ChokeMessage chokeMessage)
+            {
+                Console.WriteLine($"{peer.Address} -> Choke");
+
+                if (!this.RemoteChoked)
+                {
+                    this.RemoteChoked = true;
+
+                    lock (this.downloadQueue)
+                    {
+                        this.downloadQueue.Clear();
+                    }
+
+                    lock (this.downloadMemory)
+                    {
+                        this.downloadMemory.Clear();
+                    }
+
+                    this.backlogSemaphore.Release(MaxBacklog - this.backlogSemaphore.CurrentCount);
+                    eventHandler.RemoteChokedChanged(this, true);
+                }
+            }
+            else if (message is UnchokeMessage unchokeMessage)
+            {
+                Console.WriteLine($"{peer.Address} -> Unchoke");
+
+                if (this.RemoteChoked)
+                {
+                    this.RemoteChoked = false;
+                    eventHandler.RemoteChokedChanged(this, false);
+                }
+            }
+            else if (message is InterestedMessage interestedMessage)
+            {
+                Console.WriteLine($"{peer.Address} -> Interested");
+
+                if (!this.RemoteInterested)
+                {
+                    this.RemoteInterested = true;
+                    eventHandler.RemoteInterestedChanged(this, true);
+                }
+            }
+            else if (message is NotInterestedMessage notInterestedMessage)
+            {
+                Console.WriteLine($"{peer.Address} -> Not Interested");
+
+                if (this.RemoteInterested)
+                {
+                    lock (this.uploadMemory)
+                    {
+                        this.uploadMemory.Clear();
+                    }
+
+                    this.RemoteInterested = false;
+                    eventHandler.RemoteInterestedChanged(this, false);
+                }
+            }
+            else if (message is HaveMessage haveMessage)
+            {
+                Console.WriteLine($"{peer.Address} -> Have {haveMessage.PieceIndex}");
+
+                this.bitfield.SetPiece(haveMessage.PieceIndex);
+                eventHandler.BitfieldChanged(this, this.bitfield);
+
+                lock (this.uploadMemory)
+                {
+                    if (this.uploadMemory.ContainsKey(haveMessage.PieceIndex))
+                    {
+                        this.uploadMemory.Remove(haveMessage.PieceIndex);
+                    }
+                }
+            }
+            else if (message is BitfieldMessage bitfieldMessage)
+            {
+                this.bitfield = new Bitfield(torrent.NumberOfPieces, bitfieldMessage.Bitfield);
+
+                Console.WriteLine($"{peer.Address} -> Bitfield ({bitfieldMessage.Bitfield.Length} bytes), has {this.bitfield.CompletedPieceCount} of {torrent.NumberOfPieces} pieces = {this.bitfield.CompletedPieceCount * 100.0 / torrent.NumberOfPieces:N1}%");
+
+                eventHandler.BitfieldChanged(this, this.bitfield);
+            }
+            else if (message is RequestMessage requestMessage)
+            {
+                var pieceMessage = new PieceMessage(
+                    requestMessage.PieceIndex,
+                    requestMessage.Begin,
+                    requestMessage.Length);
+
+                bool loadPiece = false;
+
+                lock (this.uploadMemory)
+                {
+                    loadPiece = !this.uploadMemory.ContainsKey(pieceMessage.PieceIndex);
+                }
+
+                var memoryPiece = await eventHandler.LoadPieceAsync(this, pieceMessage.PieceIndex);
+
+                lock (this.uploadMemory)
+                {
+                    this.uploadMemory[pieceMessage.PieceIndex] = memoryPiece;
+                }
+
+                this.messageQueue.Enqueue(pieceMessage);
+                this.messageQueueEvent.Set();
+            }
+            else if (message is PieceMessage pieceMessage)
+            {
+                this.backlogSemaphore.Release();
+                var complete = false;
+
+                lock (this.downloadMemory)
+                {
+                    if (this.downloadMemory.ContainsKey(pieceMessage.PieceIndex))
+                    {
+                        this.downloadMemory[pieceMessage.PieceIndex].Write(pieceMessage.GetData(), pieceMessage.Begin);
+                        complete = this.downloadMemory[pieceMessage.PieceIndex].IsComplete();
+                    }
+                }
+
+                if (complete)
+                {
+                    Console.WriteLine($"{peer.Address} -> Received piece {pieceMessage.PieceIndex}");
+
+                    await eventHandler.ReceivedPieceAsync(this, this.downloadMemory[pieceMessage.PieceIndex]);
+
+                    lock (this.downloadMemory)
+                    {
+                        this.downloadMemory.Remove(pieceMessage.PieceIndex);
+                    }
+                }
+            }
+            else if (message is CancelMessage cancelMessage)
+            {
+                Console.WriteLine($"{peer.Address} -> Cancel piece {cancelMessage.PieceIndex}, begin {cancelMessage.Begin}, length {cancelMessage.Length}");
+
+                foreach (var item in this.messageQueue)
+                {
+                    if (item is PieceMessage pieceMsg &&
+                        pieceMsg.PieceIndex == cancelMessage.PieceIndex && pieceMsg.Begin == cancelMessage.Begin && pieceMsg.Length == cancelMessage.Length)
+                    {
+                        pieceMsg.Cancelled = true;
+                    }
+                }
+            }
+            else
+            {
+                Console.WriteLine($"{peer.Address} -> Unknown message type {message}");
             }
         }
     }
@@ -342,6 +358,7 @@ public class PeerConnection(SamSession samSession, string myPeerId, Torrent torr
     private async Task SenderAsync()
     {
         var stream = this.tcpClient!.GetStream();
+        Memory<byte> sendBuffer = new byte[64];
 
         while (this.tcpClient!.Connected)
         {
@@ -353,71 +370,74 @@ public class PeerConnection(SamSession samSession, string myPeerId, Torrent torr
 
                 if (message is ChokeMessage or UnchokeMessage or InterestedMessage or NotInterestedMessage)
                 {
-                    var buffer = new byte[5];
-                    BinaryPrimitives.WriteInt32BigEndian(buffer, 1);
-                    buffer[4] = message.Type;
+                    var buffer = sendBuffer.Slice(0, 5);
+                    BinaryPrimitives.WriteInt32BigEndian(buffer.Span, 1);
+                    buffer.Span[4] = message.Type;
                     await stream.WriteAsync(buffer);
+
                     Console.WriteLine($"{peer.Address} <- {message.GetType().Name}");
                     bytesWritten += buffer.Length;
                 }
                 else if (message is BitfieldMessage bitfieldMessage)
                 {
-                    var buffer = new byte[5];
-                    BinaryPrimitives.WriteInt32BigEndian(buffer, bitfieldMessage.Bitfield.Length + 1);
-                    buffer[4] = bitfieldMessage.Type;
+                    var buffer = sendBuffer.Slice(0, 5);
+                    BinaryPrimitives.WriteInt32BigEndian(buffer.Span, bitfieldMessage.Bitfield.Length + 1);
+                    buffer.Span[4] = bitfieldMessage.Type;
                     await stream.WriteAsync(buffer);
-                    bytesWritten += buffer.Length;
                     await stream.WriteAsync(bitfieldMessage.Bitfield);
-                    bytesWritten += bitfieldMessage.Bitfield.Length;
+
                     Console.WriteLine($"{peer.Address} <- Bitfield");
+                    bytesWritten += buffer.Length + bitfieldMessage.Bitfield.Length;
                 }
                 else if (message is HaveMessage haveMessage)
                 {
-                    var buffer = new byte[9];
-                    BinaryPrimitives.WriteInt32BigEndian(buffer, 5);
-                    buffer[4] = haveMessage.Type;
-                    BinaryPrimitives.WriteInt32BigEndian(buffer.AsSpan(5), haveMessage.PieceIndex);
+                    var buffer = sendBuffer.Slice(0, 9);
+                    BinaryPrimitives.WriteInt32BigEndian(buffer.Span, 5);
+                    buffer.Span[4] = haveMessage.Type;
+                    BinaryPrimitives.WriteInt32BigEndian(buffer.Slice(5, 4).Span, haveMessage.PieceIndex);
                     await stream.WriteAsync(buffer);
-                    bytesWritten += buffer.Length;
+
                     Console.WriteLine($"{peer.Address} <- Have {haveMessage.PieceIndex}");
+                    bytesWritten += buffer.Length;
                 }
                 else if (message is KeepAliveMessage)
                 {
-                    var buffer = new byte[4];
-                    BinaryPrimitives.WriteInt32BigEndian(buffer, 0);
+                    var buffer = sendBuffer.Slice(0, 4);
+                    BinaryPrimitives.WriteInt32BigEndian(buffer.Span, 0);
                     await stream.WriteAsync(buffer);
-                    bytesWritten += buffer.Length;
+
                     Console.WriteLine($"{peer.Address} <- Heartbeat");
+                    bytesWritten += buffer.Length;
                 }
                 else if (message is PieceMessage pieceMessage && !pieceMessage.Cancelled)
                 {
-                    var buffer = new byte[13];
-                    BinaryPrimitives.WriteInt32BigEndian(buffer, 9 + pieceMessage.Length);
-                    buffer[4] = pieceMessage.Type;
-                    BinaryPrimitives.WriteInt32BigEndian(buffer.AsSpan(5), pieceMessage.PieceIndex);
-                    BinaryPrimitives.WriteInt32BigEndian(buffer.AsSpan(9), pieceMessage.Begin);
+                    var buffer = sendBuffer.Slice(0, 13); ;
+                    BinaryPrimitives.WriteInt32BigEndian(buffer.Span, 9 + pieceMessage.Length);
+                    buffer.Span[4] = pieceMessage.Type;
+                    BinaryPrimitives.WriteInt32BigEndian(buffer.Slice(5).Span, pieceMessage.PieceIndex);
+                    BinaryPrimitives.WriteInt32BigEndian(buffer.Slice(9).Span, pieceMessage.Begin);
                     await stream.WriteAsync(buffer);
-                    bytesWritten += buffer.Length;
 
                     ReadOnlyMemory<byte> data;
 
                     lock (this.uploadMemory)
                     {
-                        data = this.uploadMemory[pieceMessage.PieceIndex].Data.AsMemory(pieceMessage.Begin, pieceMessage.Length);
+                        data = this.uploadMemory[pieceMessage.PieceIndex].Data.Slice(pieceMessage.Begin, pieceMessage.Length);
                     }
 
                     await stream.WriteAsync(data);
-                    bytesWritten += data.Length;
+                    bytesWritten += buffer.Length + data.Length;
                 }
                 else if (message is RequestMessage requestMessage && !this.RemoteChoked)
                 {
-                    var buffer = new byte[17];
-                    BinaryPrimitives.WriteInt32BigEndian(buffer, 13);
-                    buffer[4] = requestMessage.Type;
-                    BinaryPrimitives.WriteInt32BigEndian(buffer.AsSpan(5), requestMessage.PieceIndex);
-                    BinaryPrimitives.WriteInt32BigEndian(buffer.AsSpan(9), requestMessage.Begin);
-                    BinaryPrimitives.WriteInt32BigEndian(buffer.AsSpan(13), requestMessage.Length);
+                    var buffer = sendBuffer.Slice(0, 17);
+                    BinaryPrimitives.WriteInt32BigEndian(buffer.Span, 13);
+                    buffer.Span[4] = requestMessage.Type;
+                    BinaryPrimitives.WriteInt32BigEndian(buffer.Slice(5).Span, requestMessage.PieceIndex);
+                    BinaryPrimitives.WriteInt32BigEndian(buffer.Slice(9).Span, requestMessage.Begin);
+                    BinaryPrimitives.WriteInt32BigEndian(buffer.Slice(13).Span, requestMessage.Length);
                     await stream.WriteAsync(buffer);
+
                     bytesWritten += buffer.Length;
                 }
 
@@ -446,7 +466,7 @@ public class PeerConnection(SamSession samSession, string myPeerId, Torrent torr
 
                 lock (this.downloadMemory)
                 {
-                    this.downloadMemory[pieceIndex] = new MemoryPiece(pieceIndex, pieceSize);
+                    this.downloadMemory[pieceIndex] = new MemoryPiece(pieceIndex, pieceSize, new byte[pieceSize]);
                 }
 
                 for (int offset = 0; offset < pieceSize; offset += BlockSize)

@@ -48,11 +48,11 @@ public class FileManager(string directory)
 
     public async Task ScanPiecesAsync(TorrentState torrentState)
     {
-        byte[] pieceData = new byte[torrentState.Torrent.PieceSize];
+        Memory<byte> pieceData = new byte[torrentState.Torrent.PieceSize];
 
         for (var pieceIndex = 0; pieceIndex < torrentState.Torrent.NumberOfPieces; pieceIndex++)
         {
-            var pieceMemory = new Memory<byte>(pieceData, 0, (int)torrentState.Torrent.GetPieceSize(pieceIndex));
+            var pieceMemory = pieceData.Slice(0, (int)torrentState.Torrent.GetPieceSize(pieceIndex));
 
             await this.ReadPieceAsync(torrentState.Torrent, pieceIndex, pieceMemory);
             byte[] pieceHash = SHA1.HashData(pieceMemory.Span);
@@ -107,9 +107,8 @@ public class FileManager(string directory)
         }
     }
 
-    public async Task WritePieceAsync(Torrent torrent, int pieceIndex, byte[] piece)
+    public async Task WritePieceAsync(Torrent torrent, int pieceIndex, ReadOnlyMemory<byte> piece)
     {
-        // TODO: Implement writing a piece to the correct file(s) based on the torrent's file structure and piece size.
         var startByte = (long)pieceIndex * torrent.PieceSize;
 
         if (torrent.FileMode == TorrentFileMode.Single)
@@ -137,7 +136,7 @@ public class FileManager(string directory)
                 fileStream.Seek(bytesToSkip, SeekOrigin.Begin);
 
                 int bytesToWrite = (int)Math.Min(piece.Length - pieceOffset, file.FileSize - bytesToSkip);
-                await fileStream.WriteAsync(piece.AsMemory(pieceOffset, bytesToWrite));
+                await fileStream.WriteAsync(piece.Slice(pieceOffset, bytesToWrite));
 
                 pieceOffset += bytesToWrite;
                 bytesToSkip = 0;

@@ -4,25 +4,58 @@ namespace Bi2pTorrent.Client.Protocol;
 
 public class Handshake
 {
-    public static Handshake FromStream(Stream stream)
+    public static async Task<Handshake> FromStreamAsync(Stream stream)
     {
         var handshake = new Handshake();
-        handshake.Length = (byte)stream.ReadByte();
-        stream.ReadExactly(handshake.Protocol, 0, handshake.Length);
-        stream.ReadExactly(handshake.Reserved, 0, 8);
-        stream.ReadExactly(handshake.InfoHash, 0, 20);
-        stream.ReadExactly(handshake.PeerId, 0, 20);
+        await stream.ReadExactlyAsync(handshake.bytes);
 
         return handshake;
     }
 
-    public byte Length { get; set; } = 19;
+    private byte[] bytes = new byte[68];
 
-    public byte[] Protocol { get; set; } = Encoding.ASCII.GetBytes("BitTorrent protocol");
-    
-    public byte[] Reserved { get; set; } = new byte[8];
-    
-    public byte[] InfoHash { get; set; } = new byte[20];
-    
-    public byte[] PeerId { get; set; } = new byte[20];
+    public byte Length
+    {
+        get => this.bytes[0];
+        set => this.bytes[0] = value;
+    }
+
+    public string Protocol
+    {
+        get => Encoding.ASCII.GetString(this.bytes.AsSpan(1, 19));
+        set => Encoding.ASCII.GetBytes(value).CopyTo(this.bytes.AsSpan(1, 19));
+    }
+
+    public byte[] Reserved
+    {
+        get => this.bytes.AsSpan(20, 8).ToArray();
+        set => value.CopyTo(this.bytes.AsSpan(20, 8));
+    }
+
+    public byte[] InfoHash
+    {
+        get => this.bytes.AsSpan(28, 20).ToArray();
+        set => value.CopyTo(this.bytes.AsSpan(28, 20));
+    }
+
+    public string PeerId
+    {
+        get => Encoding.ASCII.GetString(this.bytes.AsSpan(48, 20));
+        set => Encoding.ASCII.GetBytes(value).CopyTo(this.bytes.AsSpan(48, 20));
+    }
+
+    public Handshake() { }
+
+    public Handshake(byte[] infoHash, string peerId)
+    {
+        this.Length = 19;
+        this.Protocol = "BitTorrent protocol";
+        this.InfoHash = infoHash;
+        this.PeerId = peerId;
+    }
+
+    public async Task ToStreamAsync(Stream stream)
+    {
+        await stream.WriteAsync(this.bytes);
+    }
 }

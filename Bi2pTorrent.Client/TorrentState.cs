@@ -21,7 +21,7 @@ public class TorrentState(Torrent torrent)
 
     public bool CheckPiece(MemoryPiece memoryPiece)
     {
-        byte[] pieceHash = SHA1.HashData(memoryPiece.Data);
+        byte[] pieceHash = SHA1.HashData(memoryPiece.Data.Span);
 
         return pieceHash.SequenceEqual(torrent.Pieces.AsSpan(memoryPiece.PieceIndex * 20, 20));
     }

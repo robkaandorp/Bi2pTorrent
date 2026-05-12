@@ -1,17 +1,17 @@
 ﻿namespace Bi2pTorrent.Client;
 
-public class MemoryPiece(int pieceIndex, long pieceSize)
+public class MemoryPiece(int pieceIndex, long pieceSize, Memory<byte> data)
 {
-    private readonly byte[] data = new byte[pieceSize];
+    private readonly Memory<byte> data = data;
     private readonly List<(int begin, int length)> written = [];
 
     public int PieceIndex => pieceIndex;
 
-    public byte[] Data => data;
+    public ReadOnlyMemory<byte> Data => data;
 
-    public void Write(byte[] buffer, int begin, int length)
+    public void Write(ReadOnlyMemory<byte> buffer, int begin)
     {
-        if (begin < 0 || length < 0 || begin + length > this.data.Length)
+        if (begin < 0 || begin + buffer.Length > this.data.Length)
         {
             throw new ArgumentOutOfRangeException("Begin and length must specify a valid range within the piece.");
         }
@@ -21,8 +21,8 @@ public class MemoryPiece(int pieceIndex, long pieceSize)
             throw new InvalidOperationException("This range has already been written.");
         }
 
-        Array.Copy(buffer, 0, this.data, begin, length);
-        this.written.Add((begin, length));
+        buffer.CopyTo(this.data.Slice(begin));
+        this.written.Add((begin, buffer.Length));
     }
 
     public bool IsComplete()

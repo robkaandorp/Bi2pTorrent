@@ -81,10 +81,10 @@ public class TorrentManager(TorrentState torrentState, FileManager fileManager) 
 
     public async Task<MemoryPiece> LoadPieceAsync(PeerConnection peerConnection, int pieceIndex)
     {
-        var memoryPiece = new MemoryPiece(pieceIndex, torrentState.Torrent.GetPieceSize(pieceIndex));
-        await fileManager.ReadPieceAsync(torrentState.Torrent, pieceIndex, memoryPiece.Data);
-
-        return memoryPiece;
+        Memory<byte> pieceData = new byte[torrentState.Torrent.GetPieceSize(pieceIndex)];
+        await fileManager.ReadPieceAsync(torrentState.Torrent, pieceIndex, pieceData);
+        
+        return new MemoryPiece(pieceIndex, torrentState.Torrent.GetPieceSize(pieceIndex), pieceData);
     }
 
     private void AssignPiecesToPeer(PeerConnection peerConnection)

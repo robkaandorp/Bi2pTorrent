@@ -25,7 +25,7 @@ public class PeerListener(SamSession protocolSession, ConnectionManager[] connec
 
                 try
                 {
-                    handshake = Handshake.FromStream(acceptedConnection.TcpClient.GetStream());
+                    handshake = await Handshake.FromStreamAsync(acceptedConnection.TcpClient.GetStream());
                 }
                 catch (Exception ex)
                 {
