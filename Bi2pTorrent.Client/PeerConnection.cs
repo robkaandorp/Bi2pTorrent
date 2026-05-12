@@ -31,6 +31,7 @@ public class PeerConnection(SamSession samSession, string myPeerId, Torrent torr
     private ulong lastBytesRead = 0;
     private ulong bytesSent = 0;
     private ulong lastBytesSent = 0;
+    private readonly Dictionary<string, byte> supportedExtensions = [];
 
     public bool RemoteChoked { get; private set; } = true;
 
@@ -372,10 +373,17 @@ public class PeerConnection(SamSession samSession, string myPeerId, Torrent torr
                 {
                     Console.WriteLine($"{peer.Address} -> Extended Handshake: {extHandshake.Version}, reqq = {extHandshake.Reqq}, m = {string.Join(' ', extHandshake.SupportedExtensions.Select(kv => $"{kv.Key}={kv.Value}"))}");
                     Console.WriteLine($"Metadata size: theirs: {extHandshake.MetadataSize}, ours: {torrent.GetSizeInBytes()}");
+
+                    foreach (var ext in extHandshake.SupportedExtensions)
+                    {
+                        this.supportedExtensions[ext.Key] = ext.Value;
+                    }
                 }
                 else if (extendedMessage.Message is Protocol.ExtensionProtocol.I2pPexMessage i2pPex)
                 {
                     Console.WriteLine($"{peer.Address} -> I2P PEX: Added peers: {string.Join(", ", i2pPex.AddedPeers)} - flags: {string.Join(",", i2pPex.AddedPeersFlags)} - Dropped peers: {string.Join(", ", i2pPex.DroppedPeers)}");
+
+                    eventHandler.PeersDiscovered(this, i2pPex.AddedPeers.Select(p => new Peer(p)).ToArray());
                 }
                 else
                 {

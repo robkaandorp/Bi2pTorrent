@@ -119,4 +119,12 @@ public class TorrentManager(TorrentState torrentState, FileManager fileManager) 
 
         Console.WriteLine($"Added to download queue: {string.Join(", ", piecesToDownload)}");
     }
+
+    public void PeersDiscovered(PeerConnection peerConnection, Peer[] peers)
+    {
+        foreach (var peer in peers)
+        {
+            _ = connectionManager!.AddPeerAsync(peer);
+        }
+    }
 }
