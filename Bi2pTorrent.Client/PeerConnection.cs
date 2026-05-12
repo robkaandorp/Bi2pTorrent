@@ -97,6 +97,12 @@ public class PeerConnection(SamSession samSession, string myPeerId, Torrent torr
 
         Console.WriteLine($"{peer.Address} - Handshake successful! Extensions: {string.Join(' ', receiveHandshake.Reserved.Select(b => Convert.ToString(b, 2).PadLeft(8, '0')))}");
 
+        if ((receiveHandshake.Reserved[5] & 0x10) != 0)
+        {
+            Console.WriteLine($"{peer.Address} supports Extension Protocol.");
+            this.SendExtensionProtocolHandshake();
+        }
+
         _ = Task.Factory.StartNew(ReceiverAsync, TaskCreationOptions.LongRunning);
         _ = Task.Factory.StartNew(SenderAsync, TaskCreationOptions.LongRunning);
         _ = Task.Factory.StartNew(DownloadManagerAsync, TaskCreationOptions.LongRunning);
@@ -169,6 +175,12 @@ public class PeerConnection(SamSession samSession, string myPeerId, Torrent torr
         this.downloadQueueEvent.Set();
     }
 
+    private void SendExtensionProtocolHandshake()
+    {
+        //this.messageQueue.Enqueue(new ExtendedMessage(new Protocol.ExtensionProtocol.HandshakeMessage()));
+        //this.messageQueueEvent.Set();
+    }
+
     private async Task ReceiverAsync()
     {
         this.tcpClient!.ReceiveTimeout = 180000;    // 3 minutes
@@ -188,7 +200,7 @@ public class PeerConnection(SamSession samSession, string myPeerId, Torrent torr
                 continue;
             }
 
-            if (length > 32 * 1024)
+            if (length > buffer.Length)
             {
                 Console.WriteLine($"{peer.Address} - Invalid message length {length}, closing connection.");
                 this.tcpClient.Close();
@@ -346,6 +358,17 @@ public class PeerConnection(SamSession samSession, string myPeerId, Torrent torr
                     {
                         pieceMsg.Cancelled = true;
                     }
+                }
+            }
+            else if (message is ExtendedMessage extendedMessage)
+            {
+                if (extendedMessage.Message is Protocol.ExtensionProtocol.HandshakeMessage extHandshake)
+                {
+                    Console.WriteLine($"{peer.Address} -> Extended Handshake: {string.Join(' ', extHandshake.SupportedExtensions.Select(kv => $"{kv.Key}={kv.Value}"))}");
+                }
+                else
+                {
+                    Console.WriteLine($"{peer.Address} -> Extended {extendedMessage.Message}");
                 }
             }
             else

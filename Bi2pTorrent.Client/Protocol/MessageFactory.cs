@@ -1,7 +1,4 @@
-﻿using System;
-using System.Buffers.Binary;
-using System.Collections.Generic;
-using System.Text;
+﻿using System.Buffers.Binary;
 
 namespace Bi2pTorrent.Client.Protocol;
 
@@ -50,6 +47,9 @@ public class MessageFactory
                     BinaryPrimitives.ReadInt32BigEndian(data[1..5].Span),
                     BinaryPrimitives.ReadInt32BigEndian(data[5..9].Span),
                     BinaryPrimitives.ReadInt32BigEndian(data[9..13].Span));
+
+            case 20:
+                return new ExtendedMessage(ExtensionProtocol.ExtendedMessageFactory.Create(data.Slice(1)));
 
             default:
                 return new UnknownMessage(type, data.Slice(1).Length);

@@ -68,6 +68,11 @@ public record CancelMessage(int PieceIndex, int Begin, int Length) : IMessage
     public byte Type => 8;
 }
 
+public record ExtendedMessage(ExtensionProtocol.IExtendedMessage Message) : IMessage
+{
+    public byte Type => 20;
+}
+
 public class KeepAliveMessage : IMessage
 {
     public byte Type => 255; // Special value to indicate keep-alive
