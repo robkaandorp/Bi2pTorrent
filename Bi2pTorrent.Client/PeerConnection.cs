@@ -399,16 +399,11 @@ public class PeerConnection(SamSession samSession, string myPeerId, Torrent torr
                     await stream.WriteAsync(buffer);
                     bytesWritten += buffer.Length;
 
-                    byte[] data;
+                    ReadOnlyMemory<byte> data;
 
                     lock (this.uploadMemory)
                     {
-                        data = this.uploadMemory[pieceMessage.PieceIndex].Data;
-                    }
-
-                    if (data.Length != pieceMessage.Length)
-                    {
-                        Console.WriteLine($"Error: Trying to send piece {pieceMessage.PieceIndex} with length {data.Length}, but message specifies length {pieceMessage.Length}");
+                        data = this.uploadMemory[pieceMessage.PieceIndex].Data.AsMemory(pieceMessage.Begin, pieceMessage.Length);
                     }
 
                     await stream.WriteAsync(data);
