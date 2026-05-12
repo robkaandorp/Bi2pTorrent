@@ -66,7 +66,7 @@ public class PeerConnection(SamSession samSession, string myPeerId, Torrent torr
 
         var infoHash = torrent.GetInfoHashBytes();
 
-        var sendHandshake = new Handshake(infoHash, myPeerId);
+        var sendHandshake = new Handshake(infoHash, myPeerId, true);
         await sendHandshake.ToStreamAsync(stream);
         await stream.FlushAsync();
 
@@ -177,8 +177,14 @@ public class PeerConnection(SamSession samSession, string myPeerId, Torrent torr
 
     private void SendExtensionProtocolHandshake()
     {
-        //this.messageQueue.Enqueue(new ExtendedMessage(new Protocol.ExtensionProtocol.HandshakeMessage()));
-        //this.messageQueueEvent.Set();
+        var handshake = new Protocol.ExtensionProtocol.HandshakeMessage();
+        handshake.Reqq = 10;
+        handshake.Version = "Bi2pTorrent 0.1";
+        handshake.MetadataSize = torrent.GetSizeInBytes();
+        handshake.SupportedExtensions["i2p_pex"] = 1;
+
+        this.messageQueue.Enqueue(new ExtendedMessage(handshake));
+        this.messageQueueEvent.Set();
     }
 
     private async Task ReceiverAsync()
@@ -364,7 +370,12 @@ public class PeerConnection(SamSession samSession, string myPeerId, Torrent torr
             {
                 if (extendedMessage.Message is Protocol.ExtensionProtocol.HandshakeMessage extHandshake)
                 {
-                    Console.WriteLine($"{peer.Address} -> Extended Handshake: {string.Join(' ', extHandshake.SupportedExtensions.Select(kv => $"{kv.Key}={kv.Value}"))}");
+                    Console.WriteLine($"{peer.Address} -> Extended Handshake: {extHandshake.Version}, reqq = {extHandshake.Reqq}, m = {string.Join(' ', extHandshake.SupportedExtensions.Select(kv => $"{kv.Key}={kv.Value}"))}");
+                    Console.WriteLine($"Metadata size: theirs: {extHandshake.MetadataSize}, ours: {torrent.GetSizeInBytes()}");
+                }
+                else if (extendedMessage.Message is Protocol.ExtensionProtocol.I2pPexMessage i2pPex)
+                {
+                    Console.WriteLine($"{peer.Address} -> I2P PEX: Added peers: {string.Join(", ", i2pPex.AddedPeers)} - flags: {string.Join(",", i2pPex.AddedPeersFlags)} - Dropped peers: {string.Join(", ", i2pPex.DroppedPeers)}");
                 }
                 else
                 {
@@ -462,6 +473,26 @@ public class PeerConnection(SamSession samSession, string myPeerId, Torrent torr
                     await stream.WriteAsync(buffer);
 
                     bytesWritten += buffer.Length;
+                }
+                else if (message is ExtendedMessage extendedMessage)
+                {
+                    if (extendedMessage.Message is Protocol.ExtensionProtocol.HandshakeMessage extHandshake)
+                    {
+                        var extHandshakeData = extHandshake.EncodeAsBytes();
+                        var buffer = sendBuffer.Slice(0, 6);
+                        BinaryPrimitives.WriteInt32BigEndian(buffer.Span, extHandshakeData.Length + 2);
+                        buffer.Span[4] = extendedMessage.Type;
+                        buffer.Span[5] = extHandshake.ExtendedMessageId;
+                        await stream.WriteAsync(buffer);
+                        await stream.WriteAsync(extHandshakeData);
+
+                        Console.WriteLine($"{peer.Address} <- Extended Handshake: {extHandshake.Version}, reqq = {extHandshake.Reqq}, m = {string.Join(' ', extHandshake.SupportedExtensions.Select(kv => $"{kv.Key}={kv.Value}"))}");
+                        bytesWritten += buffer.Length + extHandshakeData.Length;
+                    }
+                    else
+                    {
+                        // We don't support sending any other extended messages yet
+                    }
                 }
 
                 lock (this.statsLock)

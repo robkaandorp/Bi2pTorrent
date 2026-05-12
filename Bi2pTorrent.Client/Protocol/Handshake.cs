@@ -46,12 +46,19 @@ public class Handshake
 
     public Handshake() { }
 
-    public Handshake(byte[] infoHash, string peerId)
+    public Handshake(byte[] infoHash, string peerId, bool extensionProtocol)
     {
         this.Length = 19;
         this.Protocol = "BitTorrent protocol";
         this.InfoHash = infoHash;
         this.PeerId = peerId;
+
+        if (extensionProtocol)
+        {
+            var reserved = this.Reserved;
+            reserved[5] |= 0x10;
+            this.Reserved = reserved;
+        }
     }
 
     public async Task ToStreamAsync(Stream stream)
