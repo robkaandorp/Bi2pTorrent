@@ -31,6 +31,8 @@ public class PeerConnection(string myPeerId, Torrent torrent, Peer peer, IPeerEv
     private ulong lastBytesSent = 0;
     private readonly Dictionary<string, byte> supportedExtensions = [];
     private readonly CancellationTokenSource cts = new();
+    private readonly ConcurrentDictionary<string, DateTime> pexAdded = [];
+    private readonly ConcurrentDictionary<string, DateTime> pexDropped = [];
 
     public bool RemoteChoked { get; private set; } = true;
 
@@ -180,6 +182,49 @@ public class PeerConnection(string myPeerId, Torrent torrent, Peer peer, IPeerEv
     {
         this.downloadQueue.Enqueue(pieceIndex);
         this.downloadQueueEvent.Set();
+    }
+
+    public void SendPex(string[] peerAddresses, string[] droppedAddresses)
+    {
+        if (this.supportedExtensions.TryGetValue("i2p_pex", out byte extId))
+        {
+            foreach (var peerAddress in peerAddresses)
+            {
+                this.pexDropped.Remove(peerAddress, out _);
+            }
+
+            foreach (var dropped in droppedAddresses)
+            {
+                this.pexAdded.Remove(dropped, out _);
+            }
+
+            var i2pPexMessage = new Protocol.ExtensionProtocol.I2pPexMessage
+            {
+                ExtendedMessageId = extId,
+                AddedPeers = peerAddresses.Except(pexAdded.Keys).Except([peer.Address]).ToList(),
+                DroppedPeers = droppedAddresses.Except(pexDropped.Keys).ToList(),
+            };
+
+            if (i2pPexMessage.AddedPeers.Count == 0 && i2pPexMessage.DroppedPeers.Count == 0)
+            {
+                return;
+            }
+
+            var message = new ExtendedMessage(i2pPexMessage);
+
+            foreach (var added in peerAddresses)
+            {
+                this.pexAdded[added] = DateTime.UtcNow;
+            }
+
+            foreach (var dropped in droppedAddresses)
+            {
+                this.pexDropped[dropped] = DateTime.UtcNow;
+            }
+
+            this.messageQueue.Enqueue(message);
+            this.messageQueueEvent.Set();
+        }
     }
 
     public void Disconnect()
@@ -559,6 +604,19 @@ public class PeerConnection(string myPeerId, Torrent torrent, Peer peer, IPeerEv
 
                         Console.WriteLine($"{peer.Address} <- Extended Handshake: {extHandshake.Version}, reqq = {extHandshake.Reqq}, m = {string.Join(' ', extHandshake.SupportedExtensions.Select(kv => $"{kv.Key}={kv.Value}"))}");
                         bytesWritten += buffer.Length + extHandshakeData.Length;
+                    }
+                    else if (extendedMessage.Message is Protocol.ExtensionProtocol.I2pPexMessage i2pPex)
+                    {
+                        var i2pPexData = i2pPex.EncodeAsBytes();
+                        var buffer = sendBuffer.Slice(0, 6);
+                        BinaryPrimitives.WriteInt32BigEndian(buffer.Span, i2pPexData.Length + 2);
+                        buffer.Span[4] = extendedMessage.Type;
+                        buffer.Span[5] = i2pPex.ExtendedMessageId;
+                        await stream.WriteAsync(buffer);
+                        await stream.WriteAsync(i2pPexData);
+
+                        Console.WriteLine($"{peer.Address} <- I2P PEX: {string.Join(", ", i2pPex.AddedPeers)} added, {string.Join(", ", i2pPex.DroppedPeers)} dropped");
+                        bytesWritten += buffer.Length + i2pPexData.Length;
                     }
                     else
                     {

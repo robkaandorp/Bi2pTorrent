@@ -1,11 +1,11 @@
 ﻿using BencodeNET.Torrents;
 
+using Bi2pTorrent.Client.Extensions;
 using Bi2pTorrent.Client.Protocol;
 
 using DotI2p;
 
 using System.Collections.Concurrent;
-using System.Net;
 using System.Net.Sockets;
 
 namespace Bi2pTorrent.Client;
@@ -17,6 +17,7 @@ public class ConnectionManager(SamSession protocolSession, string myPeerId, Torr
     private readonly ConcurrentDictionary<string, PeerConnection> peers = [];
     private readonly ConcurrentDictionary<string, DateTime> dropped = [];
     private readonly SemaphoreSlim concurrentConnects = new SemaphoreSlim(5);
+    private DateTime lastPexMessage = DateTime.MinValue;
 
     public PeerConnection[] Peers
     {
@@ -49,6 +50,19 @@ public class ConnectionManager(SamSession protocolSession, string myPeerId, Torr
                         this.peers.TryRemove(peerAddress, out _);
                         peerConnection.Disconnect();
                         Console.WriteLine($"{peerAddress} - Peer disconnected");
+                    }
+                }
+
+                // Send PEX messages to all peers
+                if (this.lastPexMessage < DateTime.UtcNow.AddMinutes(-1))
+                {
+                    this.lastPexMessage = DateTime.UtcNow;
+                    var peerAddresses = this.peers.Keys.ToArray();
+                    var droppedAddresses = this.dropped.Keys.ToArray();
+
+                    foreach (var peer in this.peers.Values)
+                    {
+                        peer.SendPex(peerAddresses, droppedAddresses);
                     }
                 }
 
@@ -174,7 +188,7 @@ public class ConnectionManager(SamSession protocolSession, string myPeerId, Torr
                 {
                     continue;
                 }
-                
+
                 this.dropped.TryRemove(address, out _);
             }
 
