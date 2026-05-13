@@ -3,15 +3,13 @@
 using Bi2pTorrent.Client.Extensions;
 using Bi2pTorrent.Client.Protocol;
 
-using DotI2p;
-
 using System.Buffers.Binary;
 using System.Collections.Concurrent;
 using System.Net.Sockets;
 
 namespace Bi2pTorrent.Client;
 
-public class PeerConnection(SamSession samSession, string myPeerId, Torrent torrent, Peer peer, IPeerEventHandler eventHandler)
+public class PeerConnection(string myPeerId, Torrent torrent, Peer peer, IPeerEventHandler eventHandler)
 {
     private const int MaxBacklog = 10;
     private const int BlockSize = 16 * 1024;
@@ -32,6 +30,7 @@ public class PeerConnection(SamSession samSession, string myPeerId, Torrent torr
     private ulong bytesSent = 0;
     private ulong lastBytesSent = 0;
     private readonly Dictionary<string, byte> supportedExtensions = [];
+    private readonly CancellationTokenSource cts = new();
 
     public bool RemoteChoked { get; private set; } = true;
 
@@ -104,9 +103,9 @@ public class PeerConnection(SamSession samSession, string myPeerId, Torrent torr
             this.SendExtensionProtocolHandshake();
         }
 
-        _ = Task.Factory.StartNew(ReceiverAsync, TaskCreationOptions.LongRunning);
-        _ = Task.Factory.StartNew(SenderAsync, TaskCreationOptions.LongRunning);
-        _ = Task.Factory.StartNew(DownloadManagerAsync, TaskCreationOptions.LongRunning);
+        _ = Task.Factory.StartNew(() => ReceiverAsync(cts.Token), TaskCreationOptions.LongRunning);
+        _ = Task.Factory.StartNew(() => SenderAsync(cts.Token), TaskCreationOptions.LongRunning);
+        _ = Task.Factory.StartNew(() => DownloadManagerAsync(cts.Token), TaskCreationOptions.LongRunning);
 
         this.heartbeatTimer.Elapsed += (s, e) =>
         {
@@ -177,6 +176,22 @@ public class PeerConnection(SamSession samSession, string myPeerId, Torrent torr
         this.downloadQueueEvent.Set();
     }
 
+    public void Disconnect()
+    {
+        this.statsTimer.Stop();
+        this.heartbeatTimer.Stop();
+        this.cts.Cancel();
+        this.tcpClient?.Close();
+
+        this.downloadQueueEvent.Close();
+        this.messageQueueEvent.Close();
+
+        this.downloadQueue.Clear();
+        this.messageQueue.Clear();
+        this.downloadMemory.Clear();
+        this.uploadMemory.Clear();
+    }
+
     private void SendExtensionProtocolHandshake()
     {
         var handshake = new Protocol.ExtensionProtocol.HandshakeMessage();
@@ -189,16 +204,28 @@ public class PeerConnection(SamSession samSession, string myPeerId, Torrent torr
         this.messageQueueEvent.Set();
     }
 
-    private async Task ReceiverAsync()
+    private async Task ReceiverAsync(CancellationToken ct)
     {
         this.tcpClient!.ReceiveTimeout = 180000;    // 3 minutes
         var stream = this.tcpClient!.GetStream();
         Memory<byte> buffer = new byte[32 * 1024];
         var lengthBytes = new byte[4];
 
-        while (this.tcpClient.Connected)
+        while (this.tcpClient.Connected && !ct.IsCancellationRequested)
         {
-            await stream.ReadExactlyAsync(lengthBytes);
+            try
+            {
+                await stream.ReadExactlyAsync(lengthBytes, ct);
+            }
+            catch (OperationCanceledException)
+            {
+                break;
+            }
+            catch (EndOfStreamException)
+            {
+                break;
+            }
+
             var length = BinaryPrimitives.ReadInt32BigEndian(lengthBytes);
 
             if (length == 0)
@@ -216,7 +243,19 @@ public class PeerConnection(SamSession samSession, string myPeerId, Torrent torr
             }
 
             var bufferSlice = buffer.Slice(0, length);
-            await stream.ReadExactlyAsync(bufferSlice);
+
+            try
+            {
+                await stream.ReadExactlyAsync(bufferSlice, ct);
+            }
+            catch (OperationCanceledException)
+            {
+                break;
+            }
+            catch (EndOfStreamException)
+            {
+                break;
+            }
 
             lock (statsLock)
             {
@@ -388,7 +427,7 @@ public class PeerConnection(SamSession samSession, string myPeerId, Torrent torr
                 }
                 else
                 {
-                    Console.WriteLine($"{peer.Address} -> Extended {extendedMessage.Message}");
+                    Console.WriteLine($"{peer.Address} -> Unknown extended type {extendedMessage.Message}");
                 }
             }
             else
@@ -398,14 +437,18 @@ public class PeerConnection(SamSession samSession, string myPeerId, Torrent torr
         }
     }
 
-    private async Task SenderAsync()
+    private async Task SenderAsync(CancellationToken ct)
     {
         var stream = this.tcpClient!.GetStream();
         Memory<byte> sendBuffer = new byte[64];
 
-        while (this.tcpClient!.Connected)
+        while (this.tcpClient!.Connected && !ct.IsCancellationRequested)
         {
-            this.messageQueueEvent.WaitOne();
+            if (!this.messageQueueEvent.WaitOne(TimeSpan.FromSeconds(5)))
+            {
+                continue;
+            }
+
             this.heartbeatTimer.Stop();
 
             while (this.tcpClient!.Connected && this.messageQueue.TryDequeue(out var message))
@@ -516,11 +559,14 @@ public class PeerConnection(SamSession samSession, string myPeerId, Torrent torr
         }
     }
 
-    private async Task DownloadManagerAsync()
+    private async Task DownloadManagerAsync(CancellationToken ct)
     {
-        while (true)
+        while (tcpClient!.Connected && !ct.IsCancellationRequested)
         {
-            this.downloadQueueEvent.WaitOne();
+            if (!this.downloadQueueEvent.WaitOne(TimeSpan.FromSeconds(5)))
+            {
+                continue;
+            }
 
             while (this.downloadQueue.TryDequeue(out var pieceIndex))
             {
@@ -538,7 +584,14 @@ public class PeerConnection(SamSession samSession, string myPeerId, Torrent torr
                 {
                     int blockSize = (int)Math.Min(BlockSize, pieceSize - offset);
 
-                    await this.backlogSemaphore.WaitAsync();
+                    try
+                    {
+                        await this.backlogSemaphore.WaitAsync(ct);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        return;
+                    }
 
                     if (this.RemoteChoked)
                     {

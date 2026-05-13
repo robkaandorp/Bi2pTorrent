@@ -40,7 +40,7 @@ public class ConnectionManager(SamSession protocolSession, string myPeerId, Torr
             }
         }
 
-        var peerConnection = new PeerConnection(protocolSession, myPeerId, torrent, peer, torrentManager);
+        var peerConnection = new PeerConnection(myPeerId, torrent, peer, torrentManager);
         var virtualStream = protocolSession.CreateVirtualStream();
 
         try
@@ -57,7 +57,7 @@ public class ConnectionManager(SamSession protocolSession, string myPeerId, Torr
 
     public async Task AddPeerFromListener(Peer peer, AcceptedConnection acceptedConnection, Handshake handshake)
     {
-        var peerConnection = new PeerConnection(protocolSession, myPeerId, torrent, peer, torrentManager);
+        var peerConnection = new PeerConnection(myPeerId, torrent, peer, torrentManager);
         await this.ConnectPeerAsync(peer, peerConnection, acceptedConnection.TcpClient, handshake);
     }
 
