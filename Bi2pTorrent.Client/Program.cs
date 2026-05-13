@@ -70,7 +70,7 @@ foreach (var torrent in torrentRepository.Torrents)
 
         foreach (var peer in response.Peers)
         {
-            await connectionManager.AddPeerAsync(peer);
+            _ = connectionManager.AddPeerAsync(peer);
         }
     }
 }

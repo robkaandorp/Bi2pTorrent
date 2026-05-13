@@ -113,6 +113,7 @@ public class PeerConnection(SamSession samSession, string myPeerId, Torrent torr
             this.messageQueue.Enqueue(new KeepAliveMessage());
             this.messageQueueEvent.Set();
         };
+        this.heartbeatTimer.AutoReset = false;
         this.heartbeatTimer.Start();
 
         this.statsTimer.Elapsed += (s, e) =>
@@ -181,7 +182,7 @@ public class PeerConnection(SamSession samSession, string myPeerId, Torrent torr
         var handshake = new Protocol.ExtensionProtocol.HandshakeMessage();
         handshake.Reqq = 10;
         handshake.Version = "Bi2pTorrent 0.1";
-        handshake.MetadataSize = torrent.GetSizeInBytes();
+        handshake.MetadataSize = torrent.GetInfoSize();
         handshake.SupportedExtensions["i2p_pex"] = 1;
 
         this.messageQueue.Enqueue(new ExtendedMessage(handshake));
@@ -372,7 +373,7 @@ public class PeerConnection(SamSession samSession, string myPeerId, Torrent torr
                 if (extendedMessage.Message is Protocol.ExtensionProtocol.HandshakeMessage extHandshake)
                 {
                     Console.WriteLine($"{peer.Address} -> Extended Handshake: {extHandshake.Version}, reqq = {extHandshake.Reqq}, m = {string.Join(' ', extHandshake.SupportedExtensions.Select(kv => $"{kv.Key}={kv.Value}"))}");
-                    Console.WriteLine($"Metadata size: theirs: {extHandshake.MetadataSize}, ours: {torrent.GetSizeInBytes()}");
+                    Console.WriteLine($"Metadata size: theirs: {extHandshake.MetadataSize}, ours: {torrent.GetInfoSize()}");
 
                     foreach (var ext in extHandshake.SupportedExtensions)
                     {
@@ -405,6 +406,7 @@ public class PeerConnection(SamSession samSession, string myPeerId, Torrent torr
         while (this.tcpClient!.Connected)
         {
             this.messageQueueEvent.WaitOne();
+            this.heartbeatTimer.Stop();
 
             while (this.tcpClient!.Connected && this.messageQueue.TryDequeue(out var message))
             {
@@ -510,6 +512,7 @@ public class PeerConnection(SamSession samSession, string myPeerId, Torrent torr
             }
 
             await stream.FlushAsync();
+            this.heartbeatTimer.Start();
         }
     }
 

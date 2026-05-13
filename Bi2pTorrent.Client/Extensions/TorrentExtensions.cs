@@ -1,4 +1,5 @@
-﻿using BencodeNET.Torrents;
+﻿using BencodeNET.Objects;
+using BencodeNET.Torrents;
 
 namespace Bi2pTorrent.Client.Extensions;
 
@@ -14,5 +15,12 @@ public static class TorrentExtensions
         }
 
         return pieceSize;
+    }
+
+    public static int GetInfoSize(this Torrent torrent)
+    {
+        var infoDict = torrent.ToBDictionary().Get<BDictionary>("info");
+
+        return infoDict.EncodeAsBytes().Length;
     }
 }
