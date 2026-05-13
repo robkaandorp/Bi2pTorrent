@@ -68,10 +68,9 @@ foreach (var torrent in torrentRepository.Torrents)
         torrentManager.SetConnectionManager(connectionManager);
         connectionManagers.Add(connectionManager);
 
-        foreach (var peer in response.Peers)
-        {
-            _ = connectionManager.AddPeerAsync(peer);
-        }
+        connectionManager.AddDiscoveredPeers(response.Peers.Select(p => p.Address).ToArray());
+
+        await connectionManager.StartAsync();
     }
 }
 

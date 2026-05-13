@@ -58,6 +58,12 @@ public class PeerConnection(string myPeerId, Torrent torrent, Peer peer, IPeerEv
         }
     }
 
+    public bool IsDead { get; private set; } = false;
+
+    public ConcurrentDictionary<string, DateTime> RemoteAdded { get; private set; } = [];
+
+    public ConcurrentDictionary<string, DateTime> RemoteDropped { get; private set; } = [];
+
     public async Task<bool> ConnectAsync(TcpClient? tcpClient, Handshake? receiveHandshake = null)
     {
         this.tcpClient = tcpClient;
@@ -119,7 +125,7 @@ public class PeerConnection(string myPeerId, Torrent torrent, Peer peer, IPeerEv
         {
             lock (this.statsLock)
             {
-                Console.WriteLine($"{peer.Address}: up: {(bytesSent - lastBytesSent) / 1024.0 / 10.0:N1} kbit/s, down: {(bytesRead - lastBytesRead) / 1024.0 / 10.0:N1} kbit/s");
+                Console.WriteLine($"{peer.Address}: up: {(bytesSent - lastBytesSent) / 1024.0 / 10.0:N1} kB/s, down: {(bytesRead - lastBytesRead) / 1024.0 / 10.0:N1} kB/s");
                 this.lastBytesSent = this.bytesSent;
                 this.lastBytesRead = this.bytesRead;
             }
@@ -423,7 +429,17 @@ public class PeerConnection(string myPeerId, Torrent torrent, Peer peer, IPeerEv
                 {
                     Console.WriteLine($"{peer.Address} -> I2P PEX: Added peers: {string.Join(", ", i2pPex.AddedPeers)} - flags: {string.Join(",", i2pPex.AddedPeersFlags)} - Dropped peers: {string.Join(", ", i2pPex.DroppedPeers)}");
 
-                    eventHandler.PeersDiscovered(this, i2pPex.AddedPeers.Select(p => new Peer(p)).ToArray());
+                    foreach (var added in i2pPex.AddedPeers)
+                    {
+                        this.RemoteDropped.Remove(added, out _);
+                        this.RemoteAdded[added] = DateTime.UtcNow;
+                    }
+
+                    foreach (var dropped in i2pPex.DroppedPeers)
+                    {
+                        this.RemoteAdded.Remove(dropped, out _);
+                        this.RemoteDropped[dropped] = DateTime.UtcNow;
+                    }
                 }
                 else
                 {
@@ -435,6 +451,8 @@ public class PeerConnection(string myPeerId, Torrent torrent, Peer peer, IPeerEv
                 Console.WriteLine($"{peer.Address} -> Unknown message type {message}");
             }
         }
+
+        this.MarkAsDead();
     }
 
     private async Task SenderAsync(CancellationToken ct)
@@ -557,6 +575,8 @@ public class PeerConnection(string myPeerId, Torrent torrent, Peer peer, IPeerEv
             await stream.FlushAsync();
             this.heartbeatTimer.Start();
         }
+
+        this.MarkAsDead();
     }
 
     private async Task DownloadManagerAsync(CancellationToken ct)
@@ -590,6 +610,7 @@ public class PeerConnection(string myPeerId, Torrent torrent, Peer peer, IPeerEv
                     }
                     catch (OperationCanceledException)
                     {
+                        this.MarkAsDead();
                         return;
                     }
 
@@ -603,6 +624,14 @@ public class PeerConnection(string myPeerId, Torrent torrent, Peer peer, IPeerEv
                     this.messageQueueEvent.Set();
                 }
             }
+
+            this.MarkAsDead();
         }
+    }
+
+    private void MarkAsDead()
+    {
+        Console.WriteLine($"{peer.Address} - Marked as dead.");
+        this.IsDead = true;
     }
 }
