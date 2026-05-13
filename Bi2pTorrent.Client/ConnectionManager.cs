@@ -5,6 +5,7 @@ using Bi2pTorrent.Client.Protocol;
 using DotI2p;
 
 using System.Collections.Concurrent;
+using System.Net;
 using System.Net.Sockets;
 
 namespace Bi2pTorrent.Client;
@@ -115,10 +116,20 @@ public class ConnectionManager(SamSession protocolSession, string myPeerId, Torr
         this.concurrentConnects.Release();
     }
 
-    public async Task AddPeerFromListener(Peer peer, AcceptedConnection acceptedConnection, Handshake handshake)
+    public async Task<bool> TryAddPeerFromListener(Peer peer, AcceptedConnection acceptedConnection, Handshake handshake)
     {
+        if (peer.Address == myAddress ||
+            this.discoveredPeers.TryGetValue(peer.Address, out bool connecting) && connecting ||
+            this.peers.ContainsKey(peer.Address))
+        {
+            acceptedConnection.TcpClient.Dispose();
+            return false;
+        }
+
         var peerConnection = new PeerConnection(myPeerId, torrent, peer, torrentManager);
         await this.ConnectPeerAsync(peer, peerConnection, acceptedConnection.TcpClient, handshake);
+
+        return true;
     }
 
     public void HavePiece(int pieceIndex)

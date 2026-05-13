@@ -43,7 +43,10 @@ public class PeerListener(SamSession protocolSession, ConnectionManager[] connec
                     continue;
                 }
 
-                await connectionManager.AddPeerFromListener(peer, acceptedConnection, handshake);
+                if (!await connectionManager.TryAddPeerFromListener(peer, acceptedConnection, handshake))
+                {
+                    virtualStream.Dispose();
+                }
             }
         }, TaskCreationOptions.LongRunning);
     }
