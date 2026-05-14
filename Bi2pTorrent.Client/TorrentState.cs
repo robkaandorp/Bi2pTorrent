@@ -1,5 +1,6 @@
 ﻿using BencodeNET.Torrents;
 
+using Bi2pTorrent.Client.Extensions;
 using Bi2pTorrent.Client.Protocol;
 
 using System.Security.Cryptography;
@@ -24,5 +25,15 @@ public class TorrentState(Torrent torrent)
         byte[] pieceHash = SHA1.HashData(memoryPiece.Data.Span);
 
         return pieceHash.SequenceEqual(torrent.Pieces.AsSpan(memoryPiece.PieceIndex * 20, 20));
+    }
+
+    public long BytesCompleted()
+    {
+        if (this.bitfield.HasPiece(this.Torrent.NumberOfPieces - 1))
+        {
+            return (this.bitfield.CompletedPieceCount - 1) * this.Torrent.PieceSize + this.Torrent.GetPieceSize(this.Torrent.NumberOfPieces - 1);
+        }
+
+        return this.bitfield.CompletedPieceCount * this.Torrent.PieceSize;
     }
 }

@@ -53,7 +53,7 @@ public class ExtendedMessageFactory
 
             case 1:
                 var i2pPexMessage = new I2pPexMessage();
-                var parser2 = new BencodeParser(Encoding.ASCII);
+                var parser2 = new BencodeParser(Encoding.Latin1);
                 var result2 = parser2.Parse(data.Slice(1).ToArray());
 
                 if (result2 is BDictionary pexDict)

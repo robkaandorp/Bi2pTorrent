@@ -22,8 +22,8 @@ public class Handshake
 
     public string Protocol
     {
-        get => Encoding.ASCII.GetString(this.bytes.AsSpan(1, 19));
-        set => Encoding.ASCII.GetBytes(value).CopyTo(this.bytes.AsSpan(1, 19));
+        get => Encoding.Latin1.GetString(this.bytes.AsSpan(1, 19));
+        set => Encoding.Latin1.GetBytes(value).CopyTo(this.bytes.AsSpan(1, 19));
     }
 
     public byte[] Reserved
@@ -40,8 +40,8 @@ public class Handshake
 
     public string PeerId
     {
-        get => Encoding.ASCII.GetString(this.bytes.AsSpan(48, 20));
-        set => Encoding.ASCII.GetBytes(value).CopyTo(this.bytes.AsSpan(48, 20));
+        get => Encoding.Latin1.GetString(this.bytes.AsSpan(48, 20));
+        set => Encoding.Latin1.GetBytes(value).CopyTo(this.bytes.AsSpan(48, 20));
     }
 
     public Handshake() { }

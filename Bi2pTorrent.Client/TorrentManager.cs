@@ -18,7 +18,7 @@ public class TorrentManager(TorrentState torrentState, FileManager fileManager) 
         if (torrentState.Bitfield.IsComplete && bitfield.IsComplete)
         {
             // Disconnect from peers that have all pieces when we already have all pieces
-            peerConnection.Disconnect();
+            connectionManager!.DisconnectPeer(peerConnection);
             return;
         }
 

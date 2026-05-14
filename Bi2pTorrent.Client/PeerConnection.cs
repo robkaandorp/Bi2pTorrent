@@ -69,7 +69,7 @@ public class PeerConnection(string myPeerId, Torrent torrent, Peer peer, IPeerEv
     public async Task<bool> ConnectAsync(TcpClient? tcpClient, Handshake? receiveHandshake = null)
     {
         this.tcpClient = tcpClient;
-        this.tcpClient!.ReceiveTimeout = 20000;
+        this.tcpClient!.ReceiveTimeout = 20_000;
         var stream = this.tcpClient!.GetStream();
 
         var infoHash = torrent.GetInfoHashBytes();
@@ -117,6 +117,11 @@ public class PeerConnection(string myPeerId, Torrent torrent, Peer peer, IPeerEv
 
         this.heartbeatTimer.Elapsed += (s, e) =>
         {
+            if (this.IsDead)
+            {
+                return;
+            }
+
             this.messageQueue.Enqueue(new KeepAliveMessage());
             this.messageQueueEvent.Set();
         };
@@ -125,6 +130,11 @@ public class PeerConnection(string myPeerId, Torrent torrent, Peer peer, IPeerEv
 
         this.statsTimer.Elapsed += (s, e) =>
         {
+            if (this.IsDead)
+            {
+                return;
+            }
+
             lock (this.statsLock)
             {
                 Console.WriteLine($"{peer.Address}: up: {(bytesSent - lastBytesSent) / 1024.0 / 10.0:N1} kB/s, down: {(bytesRead - lastBytesRead) / 1024.0 / 10.0:N1} kB/s");
@@ -231,6 +241,9 @@ public class PeerConnection(string myPeerId, Torrent torrent, Peer peer, IPeerEv
 
     public void Disconnect()
     {
+        Console.WriteLine($"---> {peer.Address} - Disconnecting");
+        Console.Out.Flush();
+
         this.statsTimer.Stop();
         this.heartbeatTimer.Stop();
         this.cts.Cancel();
@@ -259,7 +272,7 @@ public class PeerConnection(string myPeerId, Torrent torrent, Peer peer, IPeerEv
 
     private async Task ReceiverAsync(CancellationToken ct)
     {
-        this.tcpClient!.ReceiveTimeout = 180000;    // 3 minutes
+        this.tcpClient!.ReceiveTimeout = 180_000;    // 3 minutes
         var stream = this.tcpClient!.GetStream();
         Memory<byte> buffer = new byte[32 * 1024];
         var lengthBytes = new byte[4];
@@ -506,6 +519,7 @@ public class PeerConnection(string myPeerId, Torrent torrent, Peer peer, IPeerEv
 
     private async Task SenderAsync(CancellationToken ct)
     {
+        this.tcpClient!.SendTimeout = 20_000; // 20 seconds
         var stream = this.tcpClient!.GetStream();
         Memory<byte> sendBuffer = new byte[32 * 1024];
 

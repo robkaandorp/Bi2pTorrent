@@ -1,9 +1,12 @@
-﻿using BencodeNET.Objects;
+﻿using BencodeNET.IO;
+using BencodeNET.Objects;
 using BencodeNET.Parsing;
 
 using DotI2p;
 
 using Multiformats.Base;
+
+using System.Text;
 
 namespace Bi2pTorrent.Client;
 
@@ -24,10 +27,11 @@ public class AnnounceClient(SamSession samSession, string myPeerId)
         using var virtualStream = samSession.CreateVirtualStream();
         var tcpClient = await virtualStream.ConnectAsync(new DestinationKey(firstTracker.Host));
 
-        var writer = new StreamWriter(tcpClient.GetStream());
+        using var stream = tcpClient.GetStream();
+        using var writer = new StreamWriter(stream);
 
         string request = $"""
-            GET {firstTracker.Path}?info_hash=%{torrentState.Torrent.GetInfoHashBytes().Select(b => b.ToString("X2")).Aggregate((a, b) => a + "%" + b)}&peer_id={myPeerId}&port=6881&uploaded=0&downloaded=0&left={torrentState.Torrent.TotalSize - torrentState.Bitfield.CompletedPieceCount * torrentState.Torrent.PieceSize}&compact=1&ip={samSession.Destination.Destination}.i2p HTTP/1.1
+            GET {firstTracker.Path}?info_hash=%{torrentState.Torrent.GetInfoHashBytes().Select(b => b.ToString("X2")).Aggregate((a, b) => a + "%" + b)}&peer_id={myPeerId}&port=6881&uploaded=0&downloaded=0&left={torrentState.Torrent.TotalSize - torrentState.BytesCompleted()}&compact=1&ip={samSession.Destination.Destination}.i2p HTTP/1.1
             Host: {firstTracker.Host}
             Connection: close
             
@@ -37,23 +41,50 @@ public class AnnounceClient(SamSession samSession, string myPeerId)
         await writer.FlushAsync();
 
         // Read bytes form the BaseStream until the end.
-        var stream = tcpClient.GetStream();
-        var buffer = new byte[1024];
-        var numRead = stream.Read(buffer);
-        var responseList = new List<byte>();
+        using var reader = new StreamReader(stream, Encoding.Latin1);
+        var responseLine = await reader.ReadLineAsync();
 
-        while (numRead > 0)
+        if (responseLine == null || !responseLine.Equals("HTTP/1.1 200 OK"))
         {
-            responseList.AddRange(buffer.Take(numRead));
-            numRead = stream.Read(buffer);
+            throw new Exception($"Unexpected response from tracker: {responseLine}");
         }
 
-        var response = responseList.ToArray();
-        // Find two newlines in the response.
-        var endOfHeader = response.IndexOf("\r\n\r\n"u8) + 4;
+        int contentLength = 0;
+
+        while (true)
+        {
+            var responseHeaderLine = await reader.ReadLineAsync();
+
+            if (string.IsNullOrEmpty(responseHeaderLine))
+            {
+                break;
+            }
+
+            if (responseHeaderLine.StartsWith("Content-Length: ", StringComparison.OrdinalIgnoreCase))
+            {
+                var contentLengthString = responseHeaderLine.Substring("Content-Length: ".Length);
+
+                if (!int.TryParse(contentLengthString, out contentLength))
+                {
+                    throw new Exception($"Invalid Content-Length header: {contentLengthString}");
+                }
+            }
+        }
+
+        if (contentLength <= 0)
+        {
+            throw new Exception("Content-Length header is missing or invalid.");
+        }
+
+        if (contentLength > 1024 * 1024)
+        {
+            throw new Exception("Content-Length is too large.");
+        }
+
+        var body = await reader.ReadToEndAsync();
 
         var parser = new BencodeParser();
-        var result = parser.Parse(response.AsSpan(endOfHeader).ToArray());
+        var result = parser.Parse(Encoding.Latin1.GetBytes(body));
 
         if (result is BDictionary dictionary)
         {

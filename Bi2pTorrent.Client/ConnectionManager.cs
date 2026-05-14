@@ -190,6 +190,30 @@ public class ConnectionManager(SamSession protocolSession, string myPeerId, Torr
         }
     }
 
+    public void DisconnectPeer(PeerConnection peerConnection)
+    {
+        if (peerConnection == null)
+        {
+            return;
+        }
+
+        if (this.discoveredPeers.TryRemove(peerConnection.Peer.Address, out var connecting))
+        {
+            if (connecting)
+            {
+                this.concurrentConnects.Release();
+            }
+        }
+
+        if (this.peers.TryRemove(peerConnection.Peer.Address, out _))
+        {
+            peerConnection.Disconnect();
+            // TODO dispose
+        }
+
+        this.dropped[peerConnection.Peer.Address] = DateTime.UtcNow;
+    }
+
     private async Task ConnectPeerAsync(Peer peer, PeerConnection peerConnection, TcpClient tcpClient, Handshake? handshake = null)
     {
         if (await peerConnection.ConnectAsync(tcpClient, handshake))
