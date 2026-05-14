@@ -15,6 +15,13 @@ public class TorrentManager(TorrentState torrentState, FileManager fileManager) 
 
     public void BitfieldChanged(PeerConnection peerConnection, Bitfield bitfield)
     {
+        if (torrentState.Bitfield.IsComplete && bitfield.IsComplete)
+        {
+            // Disconnect from peers that have all pieces when we already have all pieces
+            peerConnection.Disconnect();
+            return;
+        }
+
         this.pieceMap.AddPeerBitfield(peerConnection.Peer, bitfield);
         var interesting = bitfield.And(torrentState.Bitfield.Not());
 
@@ -85,6 +92,11 @@ public class TorrentManager(TorrentState torrentState, FileManager fileManager) 
         await fileManager.ReadPieceAsync(torrentState.Torrent, pieceIndex, pieceData);
         
         return new MemoryPiece(pieceIndex, torrentState.Torrent.GetPieceSize(pieceIndex), pieceData);
+    }
+
+    public void AddDiscoveredPeers(string[] addresses)
+    {
+        this.connectionManager!.AddDiscoveredPeers(addresses);
     }
 
     private void AssignPiecesToPeer(PeerConnection peerConnection)

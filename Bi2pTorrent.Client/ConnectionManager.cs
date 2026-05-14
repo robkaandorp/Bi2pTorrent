@@ -1,6 +1,5 @@
 ﻿using BencodeNET.Torrents;
 
-using Bi2pTorrent.Client.Extensions;
 using Bi2pTorrent.Client.Protocol;
 
 using DotI2p;
@@ -64,11 +63,6 @@ public class ConnectionManager(SamSession protocolSession, string myPeerId, Torr
                     {
                         peer.SendPex(peerAddresses, droppedAddresses);
                     }
-                }
-
-                foreach (var peer in this.peers.Values)
-                {
-                    this.AddDiscoveredPeers(peer.RemoteAdded.Keys.ToArray());
                 }
 
                 // Connect to discovered peers
