@@ -55,7 +55,7 @@ public class I2pPexMessage : IExtendedMessage
 
         if (AddedPeers.Count > 0)
         {
-            dict["added"] = new BString(AddedPeers.SelectMany(peer => peer.Split(".b32.i2p")[0].FromB32AddressToBytes()).ToArray());
+            dict["added"] = new BString(AddedPeers.SelectMany(peer => peer.FromB32AddressToBytes()).ToArray());
         }
 
         if (AddedPeersFlags.Count > 0)
@@ -65,7 +65,7 @@ public class I2pPexMessage : IExtendedMessage
 
         if (DroppedPeers.Count > 0)
         {
-            dict["dropped"] = new BString(DroppedPeers.SelectMany(peer => peer.Split(".b32.i2p")[0].FromB32AddressToBytes()).ToArray());
+            dict["dropped"] = new BString(DroppedPeers.SelectMany(peer => peer.FromB32AddressToBytes()).ToArray());
         }
 
         return dict.EncodeAsBytes();

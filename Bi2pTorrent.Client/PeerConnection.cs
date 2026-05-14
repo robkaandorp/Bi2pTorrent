@@ -608,14 +608,22 @@ public class PeerConnection(string myPeerId, Torrent torrent, Peer peer, IPeerEv
                     }
                     else if (extendedMessage.Message is Protocol.ExtensionProtocol.I2pPexMessage i2pPex)
                     {
-                        var i2pPexData = i2pPex.EncodeAsBytes();
-                        buffer = sendBuffer.Slice(0, 4 + i2pPexData.Length + 2);
-                        BinaryPrimitives.WriteInt32BigEndian(buffer.Span, i2pPexData.Length + 2);
-                        buffer.Span[4] = extendedMessage.Type;
-                        buffer.Span[5] = i2pPex.ExtendedMessageId;
-                        i2pPexData.CopyTo(buffer.Slice(6));
+                        try
+                        {
+                            var i2pPexData = i2pPex.EncodeAsBytes();
+                            buffer = sendBuffer.Slice(0, 4 + i2pPexData.Length + 2);
+                            BinaryPrimitives.WriteInt32BigEndian(buffer.Span, i2pPexData.Length + 2);
+                            buffer.Span[4] = extendedMessage.Type;
+                            buffer.Span[5] = i2pPex.ExtendedMessageId;
+                            i2pPexData.CopyTo(buffer.Slice(6));
 
-                        Console.WriteLine($"{peer.Address} <- I2P PEX: {string.Join(", ", i2pPex.AddedPeers)} added, {string.Join(", ", i2pPex.DroppedPeers)} dropped");
+                            Console.WriteLine($"{peer.Address} <- I2P PEX: {string.Join(", ", i2pPex.AddedPeers)} added, {string.Join(", ", i2pPex.DroppedPeers)} dropped");
+                        }
+                        catch (Exception ex)
+                        {
+                            Console.WriteLine($"{peer.Address} - Failed to encode I2P PEX message: {ex.Message}");
+                            continue;
+                        }
                     }
                     else
                     {
