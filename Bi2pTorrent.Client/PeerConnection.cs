@@ -507,7 +507,7 @@ public class PeerConnection(string myPeerId, Torrent torrent, Peer peer, IPeerEv
     private async Task SenderAsync(CancellationToken ct)
     {
         var stream = this.tcpClient!.GetStream();
-        Memory<byte> sendBuffer = new byte[64];
+        Memory<byte> sendBuffer = new byte[32 * 1024];
 
         while (this.tcpClient!.Connected && !ct.IsCancellationRequested)
         {
@@ -520,121 +520,105 @@ public class PeerConnection(string myPeerId, Torrent torrent, Peer peer, IPeerEv
 
             while (this.tcpClient!.Connected && this.messageQueue.TryDequeue(out var message))
             {
-                int bytesWritten = 0;
+                Memory<byte> buffer = null;
 
                 if (message is ChokeMessage or UnchokeMessage or InterestedMessage or NotInterestedMessage)
                 {
-                    var buffer = sendBuffer.Slice(0, 5);
+                    buffer = sendBuffer.Slice(0, 4 + 1);
                     BinaryPrimitives.WriteInt32BigEndian(buffer.Span, 1);
                     buffer.Span[4] = message.Type;
-                    await stream.WriteAsync(buffer);
 
                     Console.WriteLine($"{peer.Address} <- {message.GetType().Name}");
-                    bytesWritten += buffer.Length;
                 }
                 else if (message is BitfieldMessage bitfieldMessage)
                 {
-                    var buffer = sendBuffer.Slice(0, 5);
+                    buffer = sendBuffer.Slice(0, 4 + bitfieldMessage.Bitfield.Length + 1);
                     BinaryPrimitives.WriteInt32BigEndian(buffer.Span, bitfieldMessage.Bitfield.Length + 1);
                     buffer.Span[4] = bitfieldMessage.Type;
-                    await stream.WriteAsync(buffer);
-                    await stream.WriteAsync(bitfieldMessage.Bitfield);
+                    bitfieldMessage.Bitfield.CopyTo(buffer.Slice(5));
 
                     Console.WriteLine($"{peer.Address} <- Bitfield");
-                    bytesWritten += buffer.Length + bitfieldMessage.Bitfield.Length;
                 }
                 else if (message is HaveMessage haveMessage)
                 {
-                    var buffer = sendBuffer.Slice(0, 9);
+                    buffer = sendBuffer.Slice(0, 9);
                     BinaryPrimitives.WriteInt32BigEndian(buffer.Span, 5);
                     buffer.Span[4] = haveMessage.Type;
                     BinaryPrimitives.WriteInt32BigEndian(buffer.Slice(5, 4).Span, haveMessage.PieceIndex);
                     await stream.WriteAsync(buffer);
 
                     Console.WriteLine($"{peer.Address} <- Have {haveMessage.PieceIndex}");
-                    bytesWritten += buffer.Length;
                 }
                 else if (message is KeepAliveMessage)
                 {
-                    var buffer = sendBuffer.Slice(0, 4);
+                    buffer = sendBuffer.Slice(0, 4);
                     BinaryPrimitives.WriteInt32BigEndian(buffer.Span, 0);
-                    await stream.WriteAsync(buffer);
 
                     Console.WriteLine($"{peer.Address} <- Heartbeat");
-                    bytesWritten += buffer.Length;
                 }
                 else if (message is PieceMessage pieceMessage && !pieceMessage.Cancelled)
                 {
-                    var buffer = sendBuffer.Slice(0, 13); ;
+                    buffer = sendBuffer.Slice(0, 4 + 9 + pieceMessage.Length); ;
                     BinaryPrimitives.WriteInt32BigEndian(buffer.Span, 9 + pieceMessage.Length);
                     buffer.Span[4] = pieceMessage.Type;
                     BinaryPrimitives.WriteInt32BigEndian(buffer.Slice(5).Span, pieceMessage.PieceIndex);
                     BinaryPrimitives.WriteInt32BigEndian(buffer.Slice(9).Span, pieceMessage.Begin);
-                    await stream.WriteAsync(buffer);
-
-                    ReadOnlyMemory<byte> data;
 
                     lock (this.uploadMemory)
                     {
-                        data = this.uploadMemory[pieceMessage.PieceIndex].Data.Slice(pieceMessage.Begin, pieceMessage.Length);
+                        var data = this.uploadMemory[pieceMessage.PieceIndex].Data.Slice(pieceMessage.Begin, pieceMessage.Length);
+                        data.CopyTo(buffer.Slice(13));
                     }
-
-                    await stream.WriteAsync(data);
-                    bytesWritten += buffer.Length + data.Length;
                 }
                 else if (message is RequestMessage requestMessage && !this.RemoteChoked)
                 {
-                    var buffer = sendBuffer.Slice(0, 17);
+                    buffer = sendBuffer.Slice(0, 17);
                     BinaryPrimitives.WriteInt32BigEndian(buffer.Span, 13);
                     buffer.Span[4] = requestMessage.Type;
                     BinaryPrimitives.WriteInt32BigEndian(buffer.Slice(5).Span, requestMessage.PieceIndex);
                     BinaryPrimitives.WriteInt32BigEndian(buffer.Slice(9).Span, requestMessage.Begin);
                     BinaryPrimitives.WriteInt32BigEndian(buffer.Slice(13).Span, requestMessage.Length);
-                    await stream.WriteAsync(buffer);
-
-                    bytesWritten += buffer.Length;
                 }
                 else if (message is ExtendedMessage extendedMessage)
                 {
                     if (extendedMessage.Message is Protocol.ExtensionProtocol.HandshakeMessage extHandshake)
                     {
                         var extHandshakeData = extHandshake.EncodeAsBytes();
-                        var buffer = sendBuffer.Slice(0, 6);
+                        buffer = sendBuffer.Slice(0, 4 + extHandshakeData.Length + 2);
                         BinaryPrimitives.WriteInt32BigEndian(buffer.Span, extHandshakeData.Length + 2);
                         buffer.Span[4] = extendedMessage.Type;
                         buffer.Span[5] = extHandshake.ExtendedMessageId;
-                        await stream.WriteAsync(buffer);
-                        await stream.WriteAsync(extHandshakeData);
+                        extHandshakeData.CopyTo(buffer.Slice(6));
 
                         Console.WriteLine($"{peer.Address} <- Extended Handshake: {extHandshake.Version}, reqq = {extHandshake.Reqq}, m = {string.Join(' ', extHandshake.SupportedExtensions.Select(kv => $"{kv.Key}={kv.Value}"))}");
-                        bytesWritten += buffer.Length + extHandshakeData.Length;
                     }
                     else if (extendedMessage.Message is Protocol.ExtensionProtocol.I2pPexMessage i2pPex)
                     {
                         var i2pPexData = i2pPex.EncodeAsBytes();
-                        var buffer = sendBuffer.Slice(0, 6);
+                        buffer = sendBuffer.Slice(0, 4 + i2pPexData.Length + 2);
                         BinaryPrimitives.WriteInt32BigEndian(buffer.Span, i2pPexData.Length + 2);
                         buffer.Span[4] = extendedMessage.Type;
                         buffer.Span[5] = i2pPex.ExtendedMessageId;
-                        await stream.WriteAsync(buffer);
-                        await stream.WriteAsync(i2pPexData);
+                        i2pPexData.CopyTo(buffer.Slice(6));
 
                         Console.WriteLine($"{peer.Address} <- I2P PEX: {string.Join(", ", i2pPex.AddedPeers)} added, {string.Join(", ", i2pPex.DroppedPeers)} dropped");
-                        bytesWritten += buffer.Length + i2pPexData.Length;
                     }
                     else
                     {
                         // We don't support sending any other extended messages yet
+                        continue;
                     }
                 }
 
+                await stream.WriteAsync(buffer, ct);
+
                 lock (this.statsLock)
                 {
-                    this.bytesSent += (ulong)bytesWritten;
+                    this.bytesSent += (ulong)buffer.Length;
                 }
             }
 
-            await stream.FlushAsync();
+            await stream.FlushAsync(ct);
             this.heartbeatTimer.Start();
         }
 
