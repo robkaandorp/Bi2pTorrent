@@ -11,7 +11,7 @@ namespace Bi2pTorrent.Client;
 
 public class PeerConnection(string myPeerId, Torrent torrent, Peer peer, IPeerEventHandler eventHandler)
 {
-    private const int MaxBacklog = 10;
+    private const int MaxBacklog = 5;
     private const int BlockSize = 16 * 1024;
     private TcpClient? tcpClient;
     private Bitfield bitfield = new Bitfield(torrent.NumberOfPieces);
@@ -23,7 +23,7 @@ public class PeerConnection(string myPeerId, Torrent torrent, Peer peer, IPeerEv
     private readonly ConcurrentQueue<int> downloadQueue = [];
     private readonly Dictionary<int, MemoryPiece> downloadMemory = [];
     private readonly Dictionary<int, MemoryPiece> uploadMemory = [];
-    private readonly SemaphoreSlim backlogSemaphore = new SemaphoreSlim(MaxBacklog);
+    private readonly SemaphoreSlim backlogSemaphore = new SemaphoreSlim(MaxBacklog, MaxBacklog);
     private readonly object statsLock = new object();
     private ulong bytesRead = 0;
     private ulong lastBytesRead = 0;
@@ -261,7 +261,7 @@ public class PeerConnection(string myPeerId, Torrent torrent, Peer peer, IPeerEv
     private void SendExtensionProtocolHandshake()
     {
         var handshake = new Protocol.ExtensionProtocol.HandshakeMessage();
-        handshake.Reqq = 10;
+        handshake.Reqq = MaxBacklog;
         handshake.Version = "Bi2pTorrent 0.1";
         handshake.MetadataSize = torrent.GetInfoSize();
         handshake.SupportedExtensions["i2p_pex"] = 1;
@@ -441,10 +441,10 @@ public class PeerConnection(string myPeerId, Torrent torrent, Peer peer, IPeerEv
 
                 lock (this.downloadMemory)
                 {
-                    if (this.downloadMemory.ContainsKey(pieceMessage.PieceIndex))
+                    if (this.downloadMemory.TryGetValue(pieceMessage.PieceIndex, out MemoryPiece? value))
                     {
-                        this.downloadMemory[pieceMessage.PieceIndex].Write(pieceMessage.GetData(), pieceMessage.Begin);
-                        complete = this.downloadMemory[pieceMessage.PieceIndex].IsComplete();
+                        value.Write(pieceMessage.GetData(), pieceMessage.Begin);
+                        complete = value.IsComplete();
                     }
                 }
 
@@ -452,7 +452,7 @@ public class PeerConnection(string myPeerId, Torrent torrent, Peer peer, IPeerEv
                 {
                     Console.WriteLine($"{peer.Address} -> Received piece {pieceMessage.PieceIndex}");
 
-                    await eventHandler.ReceivedPieceAsync(this, this.downloadMemory[pieceMessage.PieceIndex]);
+                    _ = await eventHandler.ReceivedPieceAsync(this, this.downloadMemory[pieceMessage.PieceIndex]);
 
                     lock (this.downloadMemory)
                     {
@@ -648,7 +648,7 @@ public class PeerConnection(string myPeerId, Torrent torrent, Peer peer, IPeerEv
                 continue;
             }
 
-            while (this.downloadQueue.TryDequeue(out var pieceIndex))
+            while (!this.RemoteChoked && this.downloadQueue.TryDequeue(out var pieceIndex))
             {
                 Console.WriteLine($"Starting download of piece {pieceIndex}");
 
@@ -684,9 +684,9 @@ public class PeerConnection(string myPeerId, Torrent torrent, Peer peer, IPeerEv
                     this.messageQueueEvent.Set();
                 }
             }
-
-            this.MarkAsDead();
         }
+
+        this.MarkAsDead();
     }
 
     private void MarkAsDead()
