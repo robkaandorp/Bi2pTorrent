@@ -22,7 +22,7 @@ public class FileManager(string directory)
 
         if (torrent.FileMode == TorrentFileMode.Single)
         {
-            string filePath = Path.Combine(directory, torrent.File.FileName);
+            string filePath = @"\\?\" + Path.Combine(directory, torrent.File.FileName);
 
             if (!File.Exists(filePath))
             {
@@ -35,11 +35,11 @@ public class FileManager(string directory)
 
             foreach (var file in torrent.Files)
             {
-                string filePath = Path.Combine(torrentFolder, file.FullPath);
+                string filePath = @"\\?\" + Path.Combine(torrentFolder, file.FullPath);
 
                 if (!File.Exists(filePath))
                 {
-                    Directory.CreateDirectory(@"\\?\" + Path.GetDirectoryName(filePath)!);
+                    Directory.CreateDirectory(Path.GetDirectoryName(filePath)!);
                     await this.CreateEmptyFileAsync(filePath, file.FileSize, piece);
                 }
             }
@@ -70,7 +70,7 @@ public class FileManager(string directory)
 
         if (torrent.FileMode == TorrentFileMode.Single)
         {
-            string filePath = Path.Combine(directory, torrent.File.FileName);
+            string filePath = @"\\?\" + Path.Combine(directory, torrent.File.FileName);
             using var fileStream = File.OpenRead(filePath);
             fileStream.Seek(startByte, SeekOrigin.Begin);
             await fileStream.ReadExactlyAsync(buffer);
@@ -88,7 +88,7 @@ public class FileManager(string directory)
                     continue;
                 }
 
-                string filePath = Path.Combine(directory, torrent.DisplayName, file.FullPath);
+                string filePath = @"\\?\" + Path.Combine(directory, torrent.DisplayName, file.FullPath);
 
                 using var fileStream = File.OpenRead(filePath);
                 fileStream.Seek(bytesToSkip, SeekOrigin.Begin);
@@ -113,7 +113,7 @@ public class FileManager(string directory)
 
         if (torrent.FileMode == TorrentFileMode.Single)
         {
-            string filePath = Path.Combine(directory, torrent.File.FileName);
+            string filePath = @"\\?\" + Path.Combine(directory, torrent.File.FileName);
             using var fileStream = File.OpenWrite(filePath);
             fileStream.Seek(startByte, SeekOrigin.Begin);
             await fileStream.WriteAsync(piece);
@@ -131,7 +131,7 @@ public class FileManager(string directory)
                     continue;
                 }
 
-                string filePath = Path.Combine(directory, torrent.DisplayName, file.FullPath);
+                string filePath = @"\\?\" + Path.Combine(directory, torrent.DisplayName, file.FullPath);
                 using var fileStream = File.OpenWrite(filePath);
                 fileStream.Seek(bytesToSkip, SeekOrigin.Begin);
 
