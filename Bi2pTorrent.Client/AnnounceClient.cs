@@ -19,19 +19,14 @@ public enum AnnounceEvent
     Completed
 }
 
-public class AnnounceClient(SamSession samSession, string myPeerId)
+public class AnnounceClient(DestinationKey destination, SamSubSession samSubSession, string myPeerId)
 {
     // https://www.bittorrent.org/beps/bep_0003.html
     public async Task<AnnounceResponse> SendAnnounceAsync(string tracker, InfoHash infoHash, TorrentStats torrentStats, AnnounceEvent announceEvent = AnnounceEvent.None)
     {
-        if (samSession.Destination == null)
-        {
-            throw new InvalidOperationException("SAM session must have a destination to send an announce.");
-        }
-
         var trackerUri = new UriBuilder(tracker);
 
-        using var virtualStream = samSession.CreateVirtualStream();
+        using var virtualStream = samSubSession.CreateVirtualStream();
         var tcpClient = await virtualStream.ConnectAsync(new DestinationKey(trackerUri.Host));
 
         using var stream = tcpClient.GetStream();
@@ -46,7 +41,7 @@ public class AnnounceClient(SamSession samSession, string myPeerId)
         };
 
         string request = $"""
-            GET {trackerUri.Path}?info_hash={infoHash.GetUriString()}&peer_id={myPeerId}&port=6881&uploaded={torrentStats.Uploaded}&downloaded={torrentStats.Downloaded}&left={torrentStats.Remaining}&compact=1&ip={samSession.Destination.GetB32Hostname()}{eventString} HTTP/1.1
+            GET {trackerUri.Path}?info_hash={infoHash.GetUriString()}&peer_id={myPeerId}&port=6881&uploaded={torrentStats.Uploaded}&downloaded={torrentStats.Downloaded}&left={torrentStats.Remaining}&compact=1&ip={destination.GetB32Hostname()}{eventString} HTTP/1.1
             Host: {trackerUri.Host}
             Connection: close
             

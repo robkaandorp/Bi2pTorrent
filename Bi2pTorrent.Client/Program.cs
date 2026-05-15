@@ -33,15 +33,17 @@ else
 await samConnection.ConnectAsync();
 
 var protocolSession = new SamSession(samConnection);
-var protocolDestination = await protocolSession.CreateStreamAsync();
+var destination = await protocolSession.CreatePrimarySessionAsync();
+var protocolSubSession = await protocolSession.CreateSubSession();
+var virtualStream = protocolSubSession.CreateVirtualStream();
 
-Console.WriteLine($"Protocol destination: {protocolDestination.GetB32Hostname()}");
+Console.WriteLine($"Protocol destination: {destination!.GetB32Hostname()}");
 
 var version = Assembly.GetEntryAssembly()?.GetName().Version;
 var myPeerId = $"Bi2p-{version?.Major ?? 0:X}.{version?.Minor ?? 0:X}.{version?.Build ?? 0:X}" + protocolSession.Destination!.GetB32Hostname()[..10];
 
 var connectionManagers = new List<ConnectionManager>();
-var announceClient = new AnnounceClient(protocolSession, myPeerId);
+var announceClient = new AnnounceClient(protocolSession.Destination, protocolSubSession, myPeerId);
 var trackerManager = new TrackerManager(announceClient);
 await trackerManager.LoadTrackersAsync(@"C:\Projects\Personal\Bi2pTorrent\Bi2pTorrent.Client\trackers.txt");
 await trackerManager.StartAsync();
