@@ -39,7 +39,7 @@ public class FileManager(string directory)
 
                 if (!File.Exists(filePath))
                 {
-                    Directory.CreateDirectory(Path.GetDirectoryName(filePath)!);
+                    Directory.CreateDirectory(@"\\?\" + Path.GetDirectoryName(filePath)!);
                     await this.CreateEmptyFileAsync(filePath, file.FileSize, piece);
                 }
             }
