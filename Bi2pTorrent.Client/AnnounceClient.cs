@@ -1,6 +1,7 @@
-﻿using BencodeNET.IO;
-using BencodeNET.Objects;
+﻿using BencodeNET.Objects;
 using BencodeNET.Parsing;
+
+using Bi2pTorrent.Client.Protocol;
 
 using DotI2p;
 
@@ -10,29 +11,43 @@ using System.Text;
 
 namespace Bi2pTorrent.Client;
 
+public enum AnnounceEvent
+{
+    None,
+    Started,
+    Stopped,
+    Completed
+}
+
 public class AnnounceClient(SamSession samSession, string myPeerId)
 {
     // https://www.bittorrent.org/beps/bep_0003.html
-    public async Task<AnnounceResponse> SendAnnounce(TorrentState torrentState)
+    public async Task<AnnounceResponse> SendAnnounceAsync(string tracker, InfoHash infoHash, TorrentStats torrentStats, AnnounceEvent announceEvent = AnnounceEvent.None)
     {
         if (samSession.Destination == null)
         {
             throw new InvalidOperationException("SAM session must have a destination to send an announce.");
         }
 
-        var myHostname = samSession.Destination.GetB32Hostname();
-        //var firstTracker = new UriBuilder(torrentState.Torrent.Trackers.First().First());
-        var firstTracker = new UriBuilder("http://opentracker.dg2.i2p/announce.php");   // TODO First try the trackers from the torrent, then fall back to a hardcoded one if they fail. This is just for testing.
+        var trackerUri = new UriBuilder(tracker);
 
         using var virtualStream = samSession.CreateVirtualStream();
-        var tcpClient = await virtualStream.ConnectAsync(new DestinationKey(firstTracker.Host));
+        var tcpClient = await virtualStream.ConnectAsync(new DestinationKey(trackerUri.Host));
 
         using var stream = tcpClient.GetStream();
         using var writer = new StreamWriter(stream);
 
+        var eventString = announceEvent switch
+        {
+            AnnounceEvent.Started => "&event=started",
+            AnnounceEvent.Stopped => "&event=stopped",
+            AnnounceEvent.Completed => "&event=completed",
+            _ => ""
+        };
+
         string request = $"""
-            GET {firstTracker.Path}?info_hash=%{torrentState.Torrent.GetInfoHashBytes().Select(b => b.ToString("X2")).Aggregate((a, b) => a + "%" + b)}&peer_id={myPeerId}&port=6881&uploaded=0&downloaded=0&left={torrentState.Torrent.TotalSize - torrentState.BytesCompleted()}&compact=1&ip={samSession.Destination.Destination}.i2p HTTP/1.1
-            Host: {firstTracker.Host}
+            GET {trackerUri.Path}?info_hash={infoHash.GetUriString()}&peer_id={myPeerId}&port=6881&uploaded={torrentStats.Uploaded}&downloaded={torrentStats.Downloaded}&left={torrentStats.Remaining}&compact=1&ip={samSession.Destination.Destination}.i2p{eventString} HTTP/1.1
+            Host: {trackerUri.Host}
             Connection: close
             
             """;
@@ -40,7 +55,6 @@ public class AnnounceClient(SamSession samSession, string myPeerId)
         await writer.WriteLineAsync(request);
         await writer.FlushAsync();
 
-        // Read bytes form the BaseStream until the end.
         using var reader = new StreamReader(stream, Encoding.Latin1);
         var responseLine = await reader.ReadLineAsync();
 
@@ -71,17 +85,19 @@ public class AnnounceClient(SamSession samSession, string myPeerId)
             }
         }
 
-        if (contentLength <= 0)
-        {
-            throw new Exception("Content-Length header is missing or invalid.");
-        }
+        //if (contentLength <= 0)
+        //{
+        //    throw new Exception("Content-Length header is missing or invalid.");
+        //}
 
         if (contentLength > 1024 * 1024)
         {
             throw new Exception("Content-Length is too large.");
         }
 
-        var body = await reader.ReadToEndAsync();
+        var body = (await reader.ReadToEndAsync())
+            .Split("\r\n")
+            .Last(line => line.StartsWith('d'));
 
         var parser = new BencodeParser();
         var result = parser.Parse(Encoding.Latin1.GetBytes(body));
@@ -123,7 +139,7 @@ public class AnnounceClient(SamSession samSession, string myPeerId)
                 failureReason = failureReasonString.ToString();
             }
 
-            return new AnnounceResponse(complete, incomplete, interval, peers, failureReason);
+            return new AnnounceResponse(complete, incomplete, interval, peers, DateTime.UtcNow, failureReason);
         }
 
         throw new InvalidOperationException("Unexpected response from tracker.");

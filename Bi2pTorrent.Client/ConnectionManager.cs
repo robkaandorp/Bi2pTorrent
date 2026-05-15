@@ -162,10 +162,12 @@ public class ConnectionManager(SamSession protocolSession, string myPeerId, Torr
         }
     }
 
-    public void AddDiscoveredPeers(string[] addresses)
+    public void AddDiscoveredPeers(Peer[] peers)
     {
-        foreach (string address in addresses)
+        foreach (var peer in peers)
         {
+            var address = peer.Address;
+
             if (address == myAddress)
             {
                 continue;

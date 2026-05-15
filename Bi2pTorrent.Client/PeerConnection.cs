@@ -501,7 +501,7 @@ public class PeerConnection(string myPeerId, Torrent torrent, Peer peer, IPeerEv
                         this.RemoteDropped[dropped] = DateTime.UtcNow;
                     }
 
-                    eventHandler.AddDiscoveredPeers(this.RemoteAdded.Keys.ToArray());
+                    eventHandler.AddDiscoveredPeers(this.RemoteAdded.Keys.Select(a => new Peer(a)).ToArray());
                 }
                 else
                 {
@@ -665,7 +665,7 @@ public class PeerConnection(string myPeerId, Torrent torrent, Peer peer, IPeerEv
 
                 lock (this.downloadMemory)
                 {
-                    this.downloadMemory[pieceIndex] = new MemoryPiece(pieceIndex, pieceSize, new byte[pieceSize]);
+                    this.downloadMemory[pieceIndex] = new MemoryPiece(pieceIndex, new byte[pieceSize]);
                 }
 
                 for (int offset = 0; offset < pieceSize; offset += BlockSize)

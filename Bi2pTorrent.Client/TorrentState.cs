@@ -11,6 +11,8 @@ public class TorrentState(Torrent torrent)
 {
     private Bitfield bitfield = new Bitfield(torrent.NumberOfPieces);
 
+    private long bytesCompletedAtStart = 0;
+
     public void SetPiece(int pieceIndex)
     {
         this.bitfield.SetPiece(pieceIndex);
@@ -19,6 +21,12 @@ public class TorrentState(Torrent torrent)
     public Torrent Torrent { get => torrent; }
 
     public Bitfield Bitfield { get => this.bitfield; }
+
+    public void Start()
+    {
+        // Mark the start of this session
+        this.bytesCompletedAtStart = this.BytesCompleted();
+    }
 
     public bool CheckPiece(MemoryPiece memoryPiece)
     {
@@ -36,4 +44,7 @@ public class TorrentState(Torrent torrent)
 
         return this.bitfield.CompletedPieceCount * this.Torrent.PieceSize;
     }
+
+    public TorrentStats StatsRequest() =>
+        new TorrentStats(0, this.BytesCompleted() - this.bytesCompletedAtStart, this.Torrent.TotalSize - this.BytesCompleted());
 }

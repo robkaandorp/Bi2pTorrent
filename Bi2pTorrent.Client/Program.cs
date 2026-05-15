@@ -1,8 +1,10 @@
 ﻿using Bi2pTorrent.Client;
+using Bi2pTorrent.Client.Protocol;
 
 using DotI2p;
 
 using System.Net;
+using System.Reflection;
 
 Console.WriteLine("Bi2pTorrent - A torrent client for the invisible internet");
 
@@ -30,50 +32,39 @@ else
 
 await samConnection.ConnectAsync();
 
-//var trackerSession = new SamSession(samConnection);
-//var trackerDestination = await trackerSession.CreateStreamAsync();
-
-//var trackerServer = new TrackerServer(trackerSession);
-//_ = trackerServer.StartAsync();
-
 var protocolSession = new SamSession(samConnection);
 var protocolDestination = await protocolSession.CreateStreamAsync();
 
 Console.WriteLine($"Protocol destination: {protocolDestination.GetB32Hostname()}");
 
-var myPeerId = "Bi2p-0.1.0" + protocolSession.Destination!.GetB32Hostname()[..10];
-var announceClient = new AnnounceClient(protocolSession, myPeerId);
+var version = Assembly.GetEntryAssembly()?.GetName().Version;
+var myPeerId = $"Bi2p-{version?.Major ?? 0:X}.{version?.Minor ?? 0:X}.{version?.Build ?? 0:X}" + protocolSession.Destination!.GetB32Hostname()[..10];
 
 var connectionManagers = new List<ConnectionManager>();
+var announceClient = new AnnounceClient(protocolSession, myPeerId);
+var trackerManager = new TrackerManager(announceClient);
+await trackerManager.LoadTrackersAsync(@"C:\Projects\Personal\Bi2pTorrent\Bi2pTorrent.Client\trackers.txt");
+await trackerManager.StartAsync();
 
 foreach (var torrent in torrentRepository.Torrents)
 {
+    var infoHash = new InfoHash(torrent.GetInfoHashBytes());
+
     var torrentState = new TorrentState(torrent);
     await fileManager.ScanPiecesAsync(torrentState);
+    torrentState.Start();
 
     Console.WriteLine($"{torrent.DisplayName}: {torrentState.Bitfield.CompletedPieceCount}/{torrentState.Torrent.NumberOfPieces} pieces = {torrentState.Bitfield.CompletedPieceCount * 100.0 / torrentState.Torrent.NumberOfPieces:N1}% completed.");
 
-    var response = await announceClient.SendAnnounce(torrentState);
+    var torrentManager = new TorrentManager(torrentState, fileManager);
+    var connectionManager = new ConnectionManager(protocolSession, myPeerId, torrent, torrentManager, torrentState);
+    torrentManager.SetConnectionManager(connectionManager);
+    connectionManagers.Add(connectionManager);
 
-    if (response.FailureReason != null)
-    {
-        Console.WriteLine($"Announce failed: {response.FailureReason}");
-    }
-    else
-    {
-        Console.WriteLine($"{torrent.DisplayName}: Complete: {response.Complete}, Incomplete: {response.Incomplete}, Interval: {response.Interval}, Peers: {response.Peers.Count}");
-        
-        var torrentManager = new TorrentManager(torrentState, fileManager);
-        var connectionManager = new ConnectionManager(protocolSession, myPeerId, torrent, torrentManager, torrentState);
-        torrentManager.SetConnectionManager(connectionManager);
-        connectionManagers.Add(connectionManager);
-
-        connectionManager.AddDiscoveredPeers(response.Peers.Select(p => p.Address).ToArray());
-
-        await connectionManager.StartAsync();
-    }
+    await connectionManager.StartAsync();
+    trackerManager.AddInfoHash(infoHash, torrent.IsPrivate, [.. torrent.Trackers.SelectMany(t => t)], torrentState.StatsRequest, connectionManager.AddDiscoveredPeers);
 }
 
-_ = new PeerListener(protocolSession, connectionManagers.ToArray()).StartAsync();
+_ = new PeerListener(protocolSession, [.. connectionManagers]).StartAsync();
 
 Console.ReadLine();

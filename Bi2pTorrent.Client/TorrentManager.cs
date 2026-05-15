@@ -91,12 +91,12 @@ public class TorrentManager(TorrentState torrentState, FileManager fileManager) 
         Memory<byte> pieceData = new byte[torrentState.Torrent.GetPieceSize(pieceIndex)];
         await fileManager.ReadPieceAsync(torrentState.Torrent, pieceIndex, pieceData);
         
-        return new MemoryPiece(pieceIndex, torrentState.Torrent.GetPieceSize(pieceIndex), pieceData);
+        return new MemoryPiece(pieceIndex, pieceData);
     }
 
-    public void AddDiscoveredPeers(string[] addresses)
+    public void AddDiscoveredPeers(Peer[] peers)
     {
-        this.connectionManager!.AddDiscoveredPeers(addresses);
+        this.connectionManager!.AddDiscoveredPeers(peers);
     }
 
     private void AssignPiecesToPeer(PeerConnection peerConnection)

@@ -14,5 +14,5 @@ public interface IPeerEventHandler
 
     Task<MemoryPiece> LoadPieceAsync(PeerConnection peerConnection, int pieceIndex);
 
-    void AddDiscoveredPeers(string[] addresses);
+    void AddDiscoveredPeers(Peer[] peers);
 }

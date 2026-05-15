@@ -1,6 +1,6 @@
 ﻿namespace Bi2pTorrent.Client;
 
-public class MemoryPiece(int pieceIndex, long pieceSize, Memory<byte> data)
+public class MemoryPiece(int pieceIndex, Memory<byte> data)
 {
     private readonly Memory<byte> data = data;
     private readonly List<(int begin, int length)> written = [];
