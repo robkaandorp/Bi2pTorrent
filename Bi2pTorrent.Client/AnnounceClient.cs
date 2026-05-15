@@ -46,7 +46,7 @@ public class AnnounceClient(SamSession samSession, string myPeerId)
         };
 
         string request = $"""
-            GET {trackerUri.Path}?info_hash={infoHash.GetUriString()}&peer_id={myPeerId}&port=6881&uploaded={torrentStats.Uploaded}&downloaded={torrentStats.Downloaded}&left={torrentStats.Remaining}&compact=1&ip={samSession.Destination.Destination}.i2p{eventString} HTTP/1.1
+            GET {trackerUri.Path}?info_hash={infoHash.GetUriString()}&peer_id={myPeerId}&port=6881&uploaded={torrentStats.Uploaded}&downloaded={torrentStats.Downloaded}&left={torrentStats.Remaining}&compact=1&ip={samSession.Destination.GetB32Hostname()}{eventString} HTTP/1.1
             Host: {trackerUri.Host}
             Connection: close
             
