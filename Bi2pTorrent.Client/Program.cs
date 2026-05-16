@@ -43,7 +43,7 @@ var version = Assembly.GetEntryAssembly()?.GetName().Version;
 var myPeerId = $"Bi2p-{version?.Major ?? 0:X}.{version?.Minor ?? 0:X}.{version?.Build ?? 0:X}" + protocolSession.Destination!.GetB32Hostname()[..10];
 
 var connectionManagers = new List<ConnectionManager>();
-var announceClient = new AnnounceClient(protocolSession.Destination, protocolSubSession, myPeerId);
+var announceClient = new HttpAnnounceClient(protocolSession.Destination, protocolSubSession, myPeerId);
 var trackerManager = new TrackerManager(announceClient);
 await trackerManager.LoadTrackersAsync(@"C:\Projects\Personal\Bi2pTorrent\Bi2pTorrent.Client\trackers.txt");
 await trackerManager.StartAsync();

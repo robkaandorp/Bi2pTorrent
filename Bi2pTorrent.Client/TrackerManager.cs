@@ -2,7 +2,7 @@
 
 namespace Bi2pTorrent.Client;
 
-public class TrackerManager(AnnounceClient announceClient)
+public class TrackerManager(HttpAnnounceClient announceClient)
 {
     private class TrackerState(InfoHash infoHash, bool isPrivate, string[] trackers, Func<TorrentStats> statsRequest, Action<Peer[]> discoveredPeersCallback)
     {
@@ -32,7 +32,11 @@ public class TrackerManager(AnnounceClient announceClient)
             throw new Exception($"Tracker file {filename} does not exist.");
         }
 
-        this.trackerUrls.AddRange(await File.ReadAllLinesAsync(filename));
+        this.trackerUrls.AddRange(
+            (await File.ReadAllLinesAsync(filename))
+                .Where(line => !string.IsNullOrWhiteSpace(line))
+                .Where(line => !line.StartsWith('#'))
+                .Select(line => line.Trim()));
     }
 
     public async Task StartAsync()
