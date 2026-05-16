@@ -59,7 +59,7 @@ foreach (var torrent in torrentRepository.Torrents)
     Console.WriteLine($"{torrent.DisplayName}: {torrentState.Bitfield.CompletedPieceCount}/{torrentState.Torrent.NumberOfPieces} pieces = {torrentState.Bitfield.CompletedPieceCount * 100.0 / torrentState.Torrent.NumberOfPieces:N1}% completed.");
 
     var torrentManager = new TorrentManager(torrentState, fileManager);
-    var connectionManager = new ConnectionManager(protocolSession, myPeerId, torrent, torrentManager, torrentState);
+    var connectionManager = new ConnectionManager(protocolSubSession, destination, myPeerId, torrent, torrentManager, torrentState);
     torrentManager.SetConnectionManager(connectionManager);
     connectionManagers.Add(connectionManager);
 
@@ -67,6 +67,6 @@ foreach (var torrent in torrentRepository.Torrents)
     trackerManager.AddInfoHash(infoHash, torrent.IsPrivate, [.. torrent.Trackers.SelectMany(t => t)], torrentState.StatsRequest, connectionManager.AddDiscoveredPeers);
 }
 
-_ = new PeerListener(protocolSession, [.. connectionManagers]).StartAsync();
+_ = new PeerListener(protocolSubSession, [.. connectionManagers]).StartAsync();
 
 Console.ReadLine();

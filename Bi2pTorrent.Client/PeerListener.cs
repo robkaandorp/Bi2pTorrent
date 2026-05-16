@@ -4,7 +4,7 @@ using DotI2p;
 
 namespace Bi2pTorrent.Client;
 
-public class PeerListener(SamSession protocolSession, ConnectionManager[] connectionManagers)
+public class PeerListener(SamStreamSubSession streamSubSession, ConnectionManager[] connectionManagers)
 {
     public async Task StartAsync()
     {
@@ -14,7 +14,7 @@ public class PeerListener(SamSession protocolSession, ConnectionManager[] connec
             {
                 Console.WriteLine($"Started listening for incoming connections...");
 
-                var virtualStream = protocolSession.CreateVirtualStream();
+                var virtualStream = streamSubSession.CreateVirtualStream();
                 var acceptedConnection = await virtualStream.AcceptAsync();
 
                 var peer = new Peer(acceptedConnection.Destination.GetB32Hostname());

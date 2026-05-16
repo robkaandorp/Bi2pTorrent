@@ -9,9 +9,9 @@ using System.Net.Sockets;
 
 namespace Bi2pTorrent.Client;
 
-public class ConnectionManager(SamSession protocolSession, string myPeerId, Torrent torrent, TorrentManager torrentManager, TorrentState torrentState)
+public class ConnectionManager(SamStreamSubSession streamSubSession, DestinationKey destination, string myPeerId, Torrent torrent, TorrentManager torrentManager, TorrentState torrentState)
 {
-    private readonly string myAddress = protocolSession.Destination!.GetB32Hostname();
+    private readonly string myAddress = destination.GetB32Hostname();
     private readonly ConcurrentDictionary<string, bool> discoveredPeers = [];   // Bool is true when peer is in connecting state.
     private readonly ConcurrentDictionary<string, PeerConnection> peers = [];
     private readonly ConcurrentDictionary<string, DateTime> dropped = [];
@@ -106,7 +106,7 @@ public class ConnectionManager(SamSession protocolSession, string myPeerId, Torr
         }
 
         var peerConnection = new PeerConnection(myPeerId, torrent, peer, torrentManager);
-        var virtualStream = protocolSession.CreateVirtualStream();
+        var virtualStream = streamSubSession.CreateVirtualStream();
 
         try
         {
