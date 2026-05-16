@@ -32,18 +32,17 @@ else
 
 await samConnection.ConnectAsync();
 
-var protocolSession = new SamSession(samConnection);
-var destination = await protocolSession.CreatePrimarySessionAsync();
-var protocolSubSession = await protocolSession.CreateStreamSubSession();
-var virtualStream = protocolSubSession.CreateVirtualStream();
+var primarySession = new SamSession(samConnection);
+var destination = await primarySession.CreatePrimarySessionAsync();
+var streamSubSession = await primarySession.CreateStreamSubSession();
 
 Console.WriteLine($"Protocol destination: {destination!.GetB32Hostname()}");
 
 var version = Assembly.GetEntryAssembly()?.GetName().Version;
-var myPeerId = $"Bi2p-{version?.Major ?? 0:X}.{version?.Minor ?? 0:X}.{version?.Build ?? 0:X}" + protocolSession.Destination!.GetB32Hostname()[..10];
+var myPeerId = $"Bi2p-{version?.Major ?? 0:X}.{version?.Minor ?? 0:X}.{version?.Build ?? 0:X}" + destination.GetB32Hostname()[..10];
 
 var connectionManagers = new List<ConnectionManager>();
-var announceClient = new HttpAnnounceClient(protocolSession.Destination, protocolSubSession, myPeerId);
+var announceClient = new HttpAnnounceClient(destination, streamSubSession, myPeerId);
 var trackerManager = new TrackerManager(announceClient);
 await trackerManager.LoadTrackersAsync(@"C:\Projects\Personal\Bi2pTorrent\Bi2pTorrent.Client\trackers.txt");
 await trackerManager.StartAsync();
@@ -59,7 +58,7 @@ foreach (var torrent in torrentRepository.Torrents)
     Console.WriteLine($"{torrent.DisplayName}: {torrentState.Bitfield.CompletedPieceCount}/{torrentState.Torrent.NumberOfPieces} pieces = {torrentState.Bitfield.CompletedPieceCount * 100.0 / torrentState.Torrent.NumberOfPieces:N1}% completed.");
 
     var torrentManager = new TorrentManager(torrentState, fileManager);
-    var connectionManager = new ConnectionManager(protocolSubSession, destination, myPeerId, torrent, torrentManager, torrentState);
+    var connectionManager = new ConnectionManager(streamSubSession, destination, myPeerId, torrent, torrentManager, torrentState);
     torrentManager.SetConnectionManager(connectionManager);
     connectionManagers.Add(connectionManager);
 
@@ -67,6 +66,6 @@ foreach (var torrent in torrentRepository.Torrents)
     trackerManager.AddInfoHash(infoHash, torrent.IsPrivate, [.. torrent.Trackers.SelectMany(t => t)], torrentState.StatsRequest, connectionManager.AddDiscoveredPeers);
 }
 
-_ = new PeerListener(protocolSubSession, [.. connectionManagers]).StartAsync();
+_ = new PeerListener(streamSubSession, [.. connectionManagers]).StartAsync();
 
 Console.ReadLine();
