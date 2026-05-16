@@ -11,7 +11,7 @@ using System.Text;
 
 namespace Bi2pTorrent.Client;
 
-public class HttpAnnounceClient(DestinationKey destination, SamSubSession samSubSession, string myPeerId)
+public class HttpAnnounceClient(DestinationKey destination, SamStreamSubSession samSubSession, string myPeerId)
 {
     // https://www.bittorrent.org/beps/bep_0003.html
     public async Task<AnnounceResponse> SendAnnounceAsync(string tracker, InfoHash infoHash, TorrentStats torrentStats, AnnounceEvent announceEvent = AnnounceEvent.None)

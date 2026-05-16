@@ -34,7 +34,7 @@ await samConnection.ConnectAsync();
 
 var protocolSession = new SamSession(samConnection);
 var destination = await protocolSession.CreatePrimarySessionAsync();
-var protocolSubSession = await protocolSession.CreateSubSession();
+var protocolSubSession = await protocolSession.CreateStreamSubSession();
 var virtualStream = protocolSubSession.CreateVirtualStream();
 
 Console.WriteLine($"Protocol destination: {destination!.GetB32Hostname()}");
