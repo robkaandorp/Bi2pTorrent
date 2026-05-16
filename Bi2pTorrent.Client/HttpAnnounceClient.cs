@@ -11,14 +11,6 @@ using System.Text;
 
 namespace Bi2pTorrent.Client;
 
-public enum AnnounceEvent
-{
-    None,
-    Started,
-    Stopped,
-    Completed
-}
-
 public class HttpAnnounceClient(DestinationKey destination, SamSubSession samSubSession, string myPeerId)
 {
     // https://www.bittorrent.org/beps/bep_0003.html
@@ -41,7 +33,7 @@ public class HttpAnnounceClient(DestinationKey destination, SamSubSession samSub
         };
 
         string request = $"""
-            GET {trackerUri.Path}?info_hash={infoHash.GetUriString()}&peer_id={myPeerId}&port=6881&uploaded={torrentStats.Uploaded}&downloaded={torrentStats.Downloaded}&left={torrentStats.Remaining}&compact=1&ip={destination.GetB32Hostname()}{eventString} HTTP/1.1
+            GET {trackerUri.Path}?info_hash={infoHash.GetUriString()}&peer_id={myPeerId}&port=6881&uploaded={torrentStats.Uploaded}&downloaded={torrentStats.Downloaded}&left={torrentStats.Remaining}&compact=1&ip={destination.Destination}.i2p{eventString} HTTP/1.1
             Host: {trackerUri.Host}
             Connection: close
             
